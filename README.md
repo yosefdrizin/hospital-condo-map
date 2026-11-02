@@ -3,7 +3,7 @@
 Commercial condo supply around Dallas County's 15 major hospitals (100+ licensed beds), split by who owns it
 (hospital vs independent) and whether it is medical, next to how many physicians practice within 1 mile.
 
-**Live map:** published from the `docs/` folder with GitHub Pages.
+**Live map:** https://yosefdrizin.github.io/hospital-condo-map/ (GitHub Pages, from `docs/`). Setup: SETUP-WINDOWS.md
 
 ## What's in here
 | Folder | What |
