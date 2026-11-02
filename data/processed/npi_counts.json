@@ -1,0 +1,85 @@
+{
+ "per": {
+  "Parkland Memorial Hospital": {
+   "phOff": 154,
+   "phOn": 3414,
+   "cl": 9700
+  },
+  "Medical City Dallas Hospital": {
+   "phOff": 623,
+   "phOn": 400,
+   "cl": 2552
+  },
+  "Baylor University Medical Center": {
+   "phOff": 117,
+   "phOn": 954,
+   "cl": 3451
+  },
+  "Texas Health Presbyterian Hospital Dallas": {
+   "phOff": 333,
+   "phOn": 522,
+   "cl": 2318
+  },
+  "UTSW Clements University Hospital (incl. Zale Lipshy Pavilion)": {
+   "phOff": 215,
+   "phOn": 3053,
+   "cl": 8374
+  },
+  "Methodist Dallas Medical Center": {
+   "phOff": 71,
+   "phOn": 314,
+   "cl": 994
+  },
+  "Children's Medical Center Dallas": {
+   "phOff": 152,
+   "phOn": 3404,
+   "cl": 9607
+  },
+  "Methodist Southwest Medical Center": {
+   "phOff": 170,
+   "phOn": 122,
+   "cl": 622
+  },
+  "Baylor Scott & White Medical Center - Irving": {
+   "phOff": 48,
+   "phOn": 129,
+   "cl": 499
+  },
+  "Dallas VA Medical Center": {
+   "phOff": 0,
+   "phOn": 168,
+   "cl": 1158
+  },
+  "White Rock Medical Center": {
+   "phOff": 21,
+   "phOn": 27,
+   "cl": 235
+  },
+  "Dallas Regional Medical Center": {
+   "phOff": 43,
+   "phOn": 34,
+   "cl": 307
+  },
+  "Methodist Richardson - Campbell Rd Campus": {
+   "phOff": 41,
+   "phOn": 57,
+   "cl": 986
+  },
+  "Dallas Medical Center": {
+   "phOff": 20,
+   "phOn": 39,
+   "cl": 360
+  },
+  "Advanced Dallas Hospital and Clinics": {
+   "phOff": 298,
+   "phOn": 522,
+   "cl": 2224
+  }
+ },
+ "tot": {
+  "phOff": 1737,
+  "phOn": 6180,
+  "cl": 23548
+ },
+ "as_of": "2026-11-02"
+}

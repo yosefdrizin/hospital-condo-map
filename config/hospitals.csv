@@ -1,0 +1,16 @@
+name,system,address,city,zip,beds,bed_source,lat,lon,notes
+Parkland Memorial Hospital,Parkland Health,5200 Harry Hines Blvd,Dallas,75235,983,HHSC license directory 10/21/2026,32.8131,-96.8354,Southwestern Medical District campus
+Medical City Dallas Hospital,HCA (Medical City Healthcare),7777 Forest Ln,Dallas,75230,934,HHSC license directory 10/21/2026,32.9116,-96.7733,Includes Medical City Children's beds
+Baylor University Medical Center,Baylor Scott & White Health,3500 Gaston Ave,Dallas,75246,931,HHSC license directory 10/21/2026,32.7899,-96.7779,BSW Dallas flagship
+Texas Health Presbyterian Hospital Dallas,Texas Health Resources,8200 Walnut Hill Ln,Dallas,75231,875,HHSC license directory 10/21/2026,32.8798,-96.7625,
+UTSW Clements University Hospital (incl. Zale Lipshy Pavilion),UT Southwestern,6201 Harry Hines Blvd,Dallas,75390,751,UTSW / Wikipedia (state hospital; not HHSC licensed),32.8194,-96.8492,Zale Lipshy (5151 Harry Hines; 148 beds) is a pavilion of Clements; Medical District campus
+Methodist Dallas Medical Center,Methodist Health System,1441 N Beckley Ave,Dallas,75203,595,HHSC license directory 10/21/2026,32.7613,-96.8251,
+Children's Medical Center Dallas,Children's Health,1935 Medical District Dr,Dallas,75235,488,HHSC license directory 10/21/2026,32.8095,-96.8376,Southwestern Medical District campus
+Methodist Southwest Medical Center,Methodist Health System,3500 W Wheatland Rd,Dallas,75237,314,HHSC license directory 10/21/2026,32.6455,-96.8764,Renamed from Methodist Charlton 8/1/2026
+Baylor Scott & White Medical Center - Irving,Baylor Scott & White Health,1901 N MacArthur Blvd,Irving,75061,297,HHSC license directory 10/21/2026,32.8349,-96.9610,
+Dallas VA Medical Center,VA North Texas Health Care System,4500 S Lancaster Rd,Dallas,75216,218,VA.gov (acute beds only; federal),32.6946,-96.7889,
+White Rock Medical Center,Independent (ownership to verify),9440 Poppy Dr,Dallas,75218,218,HHSC license directory 10/21/2026,32.8346,-96.7057,Operator history troubled; verify current owner
+Dallas Regional Medical Center,Prime Healthcare (verify),1011 N Galloway Ave,Mesquite,75149,202,HHSC license directory 10/21/2026,32.7786,-96.6013,
+Methodist Richardson - Campbell Rd Campus,Methodist Health System,401 W Campbell Rd,Richardson,75080,174,HHSC license directory 10/21/2026,32.9747,-96.7266,BORDERLINE: licensed special hospital; 110 non-behavioral beds; main campus is in Collin County
+Dallas Medical Center,Prime Healthcare,7 Medical Pkwy,Farmers Branch,75234,155,HHSC license directory 10/21/2026,32.9150,-96.8702,
+Advanced Dallas Hospital and Clinics,Independent (physician-owned),7502 Greenville Ave,Dallas,75231,100,HHSC license directory 10/21/2026,32.8838,-96.7579,BORDERLINE: former Walnut Hill Medical Center building; acute operations unverified

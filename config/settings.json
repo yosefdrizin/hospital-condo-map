@@ -1,0 +1,14 @@
+{
+  "dcad_year": 2026,
+  "dcad_roll_zip": "DCAD2026_CURRENT.ZIP",
+  "dcad_parcel_zip": "PARCEL2026.zip",
+  "tiger_year": 2025,
+  "county_fips": "48113",
+  "radius_miles": 1.0,
+  "context_parcel_radius_miles": 1.12,
+  "road_radius_miles": 1.3,
+  "imagery_half_width_miles": 1.2,
+  "recent_sale_years": 3,
+  "extra_npi_zips": ["75390"],
+  "notes": "Change dcad_year and the zip names when DCAD posts a new roll; then run: python pipeline/run_all.py --refresh-dcad"
+}

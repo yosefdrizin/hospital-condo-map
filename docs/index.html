@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
+<title>Hospital Condo Map</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: plat-map workspace. Fixed side panel (list, then drill-in detail) beside a full-height parcel map; stacks map-over-panel on phones. */
+:root{
+  --canvas:#EDECE2; --surface:#FFFFFF; --ink:#16170F; --muted:#6E6C60; --rule:#D8D5C6;
+  --green:#78A167; --green-dk:#3C5A31; --tan:#AFA183; --tan-dk:#7D7158; --mixed:#9A988C;
+  --land:#F4F3EC; --parcel-line:#CFCBBA; --road:#FFFFFF; --road-edge:#C9C2B0; --road-label:#5C5A4E;
+  --u-hosp:#2B2C24; --u-med:#5B7F95; --u-off:#C9C2B0; --u-ret:#D8B98C; --u-ind:#B4AFA2; --u-apt:#E2DBC8; --u-oth:#CDC7B7;
+  --focus:#3C5A31;
+  --on-photo:#FFFFFF; --photo-halo:rgba(10,12,8,.85); --photo-sel:#FFE27A; --photo-ground:#3A3D33;
+  --f-display:"Barlow Semi Condensed","Arial Narrow",Arial,sans-serif;
+  --f-body:"Barlow","Segoe UI",Arial,sans-serif;
+  --f-mono:"DM Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --canvas:#1A1B16; --surface:#23241E; --ink:#ECEBE2; --muted:#A3A094; --rule:#3A3B32;
+  --green:#8DB67B; --green-dk:#B9D7AA; --tan:#C2B595; --tan-dk:#D9CDAE; --mixed:#8E8C80;
+  --land:#20211B; --parcel-line:#3B3D33; --road:#4A4B40; --road-edge:#2C2D25; --road-label:#B7B4A6;
+  --u-hosp:#E7E5DA; --u-med:#6F98B0; --u-off:#6C6656; --u-ret:#8A7350; --u-ind:#5B584E; --u-apt:#45433A; --u-oth:#55524A;
+  --focus:#B9D7AA; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --canvas:#1A1B16; --surface:#23241E; --ink:#ECEBE2; --muted:#A3A094; --rule:#3A3B32;
+  --green:#8DB67B; --green-dk:#B9D7AA; --tan:#C2B595; --tan-dk:#D9CDAE; --mixed:#8E8C80;
+  --land:#20211B; --parcel-line:#3B3D33; --road:#4A4B40; --road-edge:#2C2D25; --road-label:#B7B4A6;
+  --u-hosp:#E7E5DA; --u-med:#6F98B0; --u-off:#6C6656; --u-ret:#8A7350; --u-ind:#5B584E; --u-apt:#45433A; --u-oth:#55524A;
+  --focus:#B9D7AA; color-scheme:dark}
+
+[hidden]{display:none!important}
+html,body{height:100%}
+body{background:var(--canvas);color:var(--ink);font-family:var(--f-body);font-size:14px;line-height:1.45}
+*{box-sizing:border-box}
+.app{height:100%;display:grid;grid-template-columns:minmax(300px,380px) 1fr;min-height:0}
+.panel{background:var(--surface);border-right:1px solid var(--rule);overflow-y:auto;min-width:0;display:flex;flex-direction:column}
+.panel-inner{padding-block:20px 28px;padding-left:max(18px,env(safe-area-inset-left,0px));padding-right:18px;display:flex;flex-direction:column;gap:18px}
+.eyebrow{font-family:var(--f-display);font-weight:600;font-size:11.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+h1{font-family:var(--f-display);font-weight:700;font-size:26px;line-height:1.05;margin:4px 0 0;text-wrap:balance;letter-spacing:-.005em}
+h2{font-family:var(--f-display);font-weight:700;font-size:21px;line-height:1.1;margin:0;text-wrap:balance}
+.sub{color:var(--muted);font-size:13px;margin:6px 0 0}
+.totals{display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--ink);border-bottom:1px solid var(--rule)}
+.totals div{padding:9px 6px 8px 0}
+.totals b{display:block;font-family:var(--f-mono);font-weight:500;font-size:19px;font-variant-numeric:tabular-nums}
+.totals span{font-size:11px;color:var(--muted);line-height:1.2;display:block}
+.controls{display:flex;flex-direction:column;gap:10px}
+.ctl-row{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--rule);border-radius:3px;padding:4px 8px;font-size:12.5px;cursor:pointer;user-select:none;background:var(--surface);color:var(--ink)}
+.chip input{position:absolute;opacity:0;pointer-events:none}
+.chip:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:1px}
+.chip:has(input:not(:checked)){color:var(--muted);opacity:.62}
+.chip:has(input:not(:checked)) .sw{background:transparent!important}
+.sw{width:11px;height:11px;border-radius:2px;border:1.5px solid var(--ink);flex:none}
+.sw.ring{border-radius:50%;border-style:dashed}
+.list{display:flex;flex-direction:column;border-top:1px solid var(--ink)}
+.list-head{display:flex;justify-content:space-between;align-items:baseline;padding:8px 0 4px;font-size:11px;color:var(--muted);font-family:var(--f-display);font-weight:600;letter-spacing:.08em;text-transform:uppercase}
+.row{all:unset;box-sizing:border-box;display:grid;grid-template-columns:1fr auto;gap:2px 12px;padding:10px 0;border-bottom:1px solid var(--rule);cursor:pointer;width:100%}
+.row:hover .row-name{text-decoration:underline;text-decoration-color:var(--tan);text-underline-offset:3px}
+.row:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.row-name{font-weight:600;font-size:14px;line-height:1.25;min-width:0}
+.row-meta{grid-column:1;font-size:12px;color:var(--muted)}
+.row-num{grid-row:1/3;grid-column:2;text-align:right;font-family:var(--f-mono);font-variant-numeric:tabular-nums;font-size:16px;align-self:center}
+.row-num small{display:block;font-size:10.5px;color:var(--muted);font-family:var(--f-body)}
+.bar{grid-column:1/3;height:4px;background:var(--canvas);border-radius:2px;overflow:hidden;margin-top:4px}
+.bar i{display:block;height:100%;background:var(--green)}
+.back{all:unset;cursor:pointer;font-size:12.5px;color:var(--muted);display:inline-flex;gap:6px;align-items:center}
+.back:hover{color:var(--ink)}
+.back:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.pill{display:inline-block;font-size:11px;font-weight:600;letter-spacing:.03em;padding:2px 7px;border-radius:2px;color:#fff;white-space:nowrap}
+.pill.own,.pill.om{background:var(--green-dk)} .pill.sgl,.pill.on{background:var(--tan-dk)} .pill.mix{background:var(--mixed)} .pill.oh{background:var(--u-hosp)}
+:root[data-theme="dark"] .pill.own,:root[data-theme="dark"] .pill.sgl,:root[data-theme="dark"] .pill.om,:root[data-theme="dark"] .pill.on,:root[data-theme="dark"] .pill.oh{color:#16170F}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .pill.own,:root:not([data-theme="light"]) .pill.sgl,:root:not([data-theme="light"]) .pill.om,:root:not([data-theme="light"]) .pill.on,:root:not([data-theme="light"]) .pill.oh{color:#16170F}}
+.facts{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid var(--ink)}
+.facts div{padding:8px 8px 8px 0;border-bottom:1px solid var(--rule);min-width:0}
+.facts dt{font-size:11px;color:var(--muted)}
+.facts dd{margin:0;font-family:var(--f-mono);font-size:14px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.facts dd.txt{font-family:var(--f-body);font-size:13.5px;font-weight:500}
+.note{font-size:12.5px;color:var(--muted);border-left:2px solid var(--tan);padding-left:10px}
+.dist{display:flex;flex-direction:column;gap:2px;font-size:13px}
+.dist div{display:flex;justify-content:space-between;gap:10px}
+.dist span:last-child{font-family:var(--f-mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+.tbl-wrap{overflow-x:auto;border-top:1px solid var(--ink)}
+table{border-collapse:collapse;width:100%;font-size:12px}
+th{text-align:left;font-weight:600;color:var(--muted);font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;padding:6px 8px 5px 0;border-bottom:1px solid var(--rule);white-space:nowrap}
+td{padding:6px 8px 6px 0;border-bottom:1px solid var(--rule);vertical-align:top}
+td.n{font-family:var(--f-mono);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+th.n{text-align:right}
+tr.excl td{color:var(--muted)}
+.med{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--u-med);margin-left:5px;vertical-align:1px}
+a{color:var(--green-dk);text-underline-offset:2px}
+.src{font-size:11.5px;color:var(--muted);border-top:1px solid var(--rule);padding-top:10px}
+#map{min-width:0;height:100%;position:relative}
+.leaflet-container{background:var(--land);font-family:var(--f-body)}
+.leaflet-bar a{background:var(--surface);color:var(--ink);border-bottom-color:var(--rule)}
+.leaflet-bar a:hover{background:var(--canvas)}
+.leaflet-bar{border:1px solid var(--rule)!important;box-shadow:none!important}
+.leaflet-top.leaflet-right{margin-top:env(safe-area-inset-top,0px);margin-right:env(safe-area-inset-right,0px)}
+.hosp-label{background:var(--ink);color:var(--canvas);border:0;border-radius:2px;box-shadow:none;font-family:var(--f-display);font-weight:600;font-size:12.5px;padding:2px 7px;white-space:nowrap}
+.hosp-label::before{display:none}
+.hosp-label.dim{opacity:.35!important}
+.focusbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:12px;color:var(--muted);margin-top:10px}
+.focusbar .chip{font-size:12px;padding:3px 8px}
+.focusbar .chip:hover{border-color:var(--ink);color:var(--ink)}
+.focusbar .chip:focus-visible{outline:2px solid var(--focus);outline-offset:1px}
+.autonote{font-size:11.5px;color:var(--muted);display:flex;gap:6px;align-items:center}
+.autonote i{width:7px;height:7px;border-radius:50%;background:var(--green);flex:none}
+.z-low .hosp-label.perm{display:none}
+.road-pin{background:none;border:0}
+.road-label{position:absolute;left:0;top:0;transform-origin:50% 50%;font-family:var(--f-display);font-weight:600;font-size:11px;letter-spacing:.04em;color:var(--road-label);white-space:nowrap;text-shadow:0 0 3px var(--land),0 0 3px var(--land),0 0 2px var(--land);pointer-events:none;text-transform:uppercase}
+.tip{background:var(--surface);color:var(--ink);border:1px solid var(--rule);box-shadow:0 2px 8px rgba(0,0,0,.12);border-radius:3px;font-size:12px;padding:4px 8px}
+.tip::before{display:none}
+.legend{position:absolute;left:max(12px,env(safe-area-inset-left,0px));bottom:max(12px,env(safe-area-inset-bottom,0px));z-index:500;background:var(--surface);border:1px solid var(--rule);border-radius:3px;padding:9px 11px;font-size:11.5px;display:grid;grid-template-columns:auto auto;gap:4px 14px;max-width:calc(100% - 24px)}
+.legend h4{grid-column:1/-1;margin:0;font-family:var(--f-display);font-weight:600;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.legend h4+*{margin-top:0}
+.legend span{display:flex;align-items:center;gap:6px;white-space:nowrap}
+.legend .sw{border-width:1px}
+.zoomhint{position:absolute;top:calc(max(12px,env(safe-area-inset-top,0px)) + 40px);left:50%;transform:translateX(-50%);z-index:500;background:var(--ink);color:var(--canvas);font-size:12px;padding:5px 10px;border-radius:3px;white-space:nowrap}
+.basebar{position:absolute;top:max(12px,env(safe-area-inset-top,0px));left:max(12px,env(safe-area-inset-left,0px));z-index:550;display:flex;background:var(--surface);border:1px solid var(--rule);border-radius:3px;overflow:hidden}
+.basebar button{all:unset;cursor:pointer;padding:6px 12px;font-family:var(--f-display);font-weight:600;font-size:12.5px;letter-spacing:.04em;color:var(--muted)}
+.basebar button[aria-pressed="true"]{background:var(--ink);color:var(--canvas)}
+.basebar button:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
+.credit{position:absolute;right:max(8px,env(safe-area-inset-right,0px));bottom:max(6px,env(safe-area-inset-bottom,0px));z-index:500;font-size:10.5px;color:var(--muted);background:var(--surface);padding:1px 6px;border-radius:2px;opacity:.9}
+#map.aerial,#map.aerial .leaflet-container{background:var(--photo-ground)}
+#map.aerial .road-label{color:var(--on-photo);text-shadow:0 0 3px var(--photo-halo),0 0 3px var(--photo-halo),0 0 2px var(--photo-halo)}
+.seg{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;color:var(--muted)}
+.seg .sb{display:inline-flex;border:1px solid var(--rule);border-radius:3px;overflow:hidden}
+.seg button{all:unset;cursor:pointer;padding:4px 10px;font-size:12.5px;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--canvas)}
+.seg button:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
+.btn-num{all:unset;box-sizing:border-box;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%;padding:10px 12px;border:1px solid var(--ink);border-radius:3px;font-family:var(--f-display);font-weight:600;font-size:14px;letter-spacing:.02em}
+.btn-num:hover{background:var(--canvas)}
+.btn-num:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.btn-num small{font-family:var(--f-body);font-weight:400;font-size:12px;color:var(--muted);letter-spacing:0}
+.facts h5{grid-column:1/-1;margin:0;padding:10px 0 4px;font-family:var(--f-display);font-weight:600;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--rule)}
+.otag{display:inline-block;font-size:10px;font-weight:600;padding:0 4px;border-radius:2px;margin-left:5px;vertical-align:1px;border:1px solid var(--rule);color:var(--muted)}
+.sheet{position:fixed;inset:0;z-index:1000;background:var(--surface);overflow:auto;padding-block:max(20px,env(safe-area-inset-top,0px)) max(28px,env(safe-area-inset-bottom,0px));padding-left:max(24px,env(safe-area-inset-left,0px));padding-right:max(24px,env(safe-area-inset-right,0px))}
+.sheet-in{max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+.sheet-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
+.sheet-head h2{font-size:26px}
+.x{all:unset;cursor:pointer;border:1px solid var(--rule);border-radius:3px;padding:6px 12px;font-size:13px;white-space:nowrap}
+.x:hover{border-color:var(--ink)}
+.x:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.ntbl{font-size:13px;min-width:980px}
+.ntbl th{white-space:normal;vertical-align:bottom;line-height:1.2;cursor:pointer;user-select:none}
+.ntbl th[aria-sort] {color:var(--ink)}
+.ntbl tr.grow th{cursor:default;color:var(--ink);font-size:10.5px;letter-spacing:.08em;border-bottom:1px solid var(--ink);padding-top:0}
+.ntbl th.gh{text-align:left}
+.ntbl th[data-k]:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
+.ntbl td{padding:8px 10px 8px 0}
+.ntbl td.n{font-size:13.5px}
+.ntbl td.z{color:var(--muted)}
+.ntbl tbody tr{cursor:pointer}
+.ntbl tbody tr:hover td{background:var(--canvas)}
+.ntbl tfoot td{font-weight:600;border-top:1px solid var(--ink);border-bottom:0}
+.ntbl .sep{border-left:1px solid var(--rule);padding-left:10px}
+.defs{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px 28px;font-size:12.5px;color:var(--muted)}
+.defs b{color:var(--ink);font-weight:600}
+.loading{position:absolute;inset:0;display:grid;place-items:center;z-index:600;color:var(--muted);font-family:var(--f-display);font-size:15px;letter-spacing:.04em;background:var(--land)}
+@media (max-width:760px){
+  .app{grid-template-columns:1fr;grid-template-rows:58vh auto;height:auto}
+  #map{height:58vh;order:-1}
+  .panel{border-right:0;border-top:1px solid var(--ink);overflow:visible}
+  .panel-inner{padding-right:max(16px,env(safe-area-inset-right,0px));padding-left:max(16px,env(safe-area-inset-left,0px))}
+  .legend{font-size:10.5px;padding:7px 9px;gap:3px 10px}
+  .legend .ctx{display:none}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+</head>
+<body>
+<div class="app">
+  <aside class="panel" id="panel"><div class="panel-inner" id="panelInner">
+    <div>
+      <div class="eyebrow">Dallas County · DCAD 2026 roll</div>
+      <h1>Commercial condos within 1 mile of each hospital</h1>
+      <p class="sub">15 acute care campuses with 100+ licensed beds. Click a hospital, a condo regime, or any commercial parcel.</p>
+    </div>
+    <div class="totals" id="totals"></div>
+    <div class="controls">
+      <div class="seg"><span>Color condos by</span><span class="sb" role="group" aria-label="Color condos by"><button id="s-own" aria-pressed="true">Ownership</button><button id="s-str" aria-pressed="false">Structure</button></span></div>
+      <div class="ctl-row" role="group" aria-label="Condo ownership" id="row-own">
+        <label class="chip"><input type="checkbox" id="f-oh" checked><i class="sw" style="background:var(--u-hosp)"></i>Hospital-owned</label>
+        <label class="chip"><input type="checkbox" id="f-om" checked><i class="sw" style="background:var(--green)"></i>Independent · medical</label>
+        <label class="chip"><input type="checkbox" id="f-on" checked><i class="sw" style="background:var(--tan)"></i>Independent · other</label>
+      </div>
+      <div class="ctl-row" role="group" aria-label="Condo structure" id="row-str" hidden>
+        <label class="chip"><input type="checkbox" id="f-own" checked><i class="sw" style="background:var(--green)"></i>Owner-user suites</label>
+        <label class="chip"><input type="checkbox" id="f-sgl" checked><i class="sw" style="background:var(--tan)"></i>Single-owner</label>
+        <label class="chip"><input type="checkbox" id="f-mix" checked><i class="sw" style="background:var(--mixed)"></i>Mixed-use master</label>
+      </div>
+      <div class="ctl-row" role="group" aria-label="Map layers">
+        <label class="chip"><input type="checkbox" id="l-ctx" checked><i class="sw" style="background:var(--u-med)"></i>Parcels by use</label>
+        <label class="chip"><input type="checkbox" id="l-roads" checked><i class="sw" style="background:var(--road-edge)"></i>Streets</label>
+        <label class="chip"><input type="checkbox" id="l-q" checked><i class="sw ring"></i>¼ mile ring</label>
+      </div>
+    </div>
+    <div id="view"></div>
+    <div class="sheet" id="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="sheetTitle"><div class="sheet-in" id="sheetIn"></div></div>
+    <div class="src">Source: Dallas Central Appraisal District 2026 roll (posted 10/12/2026) and 2026 parcel GIS; Census TIGER 2025 streets; aerial imagery from USGS The National Map (Imagery Topo) and USDA NAIP, public domain. Beds: Texas HHSC hospital directory 10/21/2026, UTSW and VA from their own sources. Appraisal records, not a broker survey.</div>
+  </div></aside>
+  <main id="map" aria-label="Parcel map">
+    <div class="loading" id="loading">Loading 53,698 parcels and aerial imagery…</div>
+    <div class="legend" aria-hidden="true">
+      <h4 id="legHead">Condo buildings by ownership</h4>
+      <span class="lg-own"><i class="sw" style="background:var(--u-hosp)"></i>Hospital-owned</span>
+      <span class="lg-own"><i class="sw" style="background:var(--green)"></i>Independent · medical</span>
+      <span class="lg-own"><i class="sw" style="background:var(--tan)"></i>Independent · other</span>
+      <span class="lg-str" hidden><i class="sw" style="background:var(--green)"></i>Owner-user suites</span>
+      <span class="lg-str" hidden><i class="sw" style="background:var(--tan)"></i>Single-owner</span>
+      <span class="lg-str" hidden><i class="sw" style="background:var(--mixed)"></i>Mixed-use master</span>
+      <h4 class="ctx">Non-condo parcels (zoom in)</h4>
+      <span class="ctx"><i class="sw" style="background:var(--u-hosp);opacity:.6"></i>Hospital campus</span>
+      <span class="ctx"><i class="sw" style="background:var(--u-med)"></i>Medical office</span>
+      <span class="ctx"><i class="sw" style="background:var(--u-off)"></i>Office / flex</span>
+      <span class="ctx"><i class="sw" style="background:var(--u-ret)"></i>Retail</span>
+      <span class="ctx"><i class="sw" style="background:var(--u-ind)"></i>Industrial</span>
+    </div>
+    <div class="zoomhint" id="zoomhint" hidden>Zoom in to see every parcel</div>
+    <div class="basebar" role="group" aria-label="Basemap"><button id="b-aerial" aria-pressed="true">Aerial</button><button id="b-plan" aria-pressed="false">Plan</button></div>
+    <div class="credit" id="credit">Imagery: USGS The National Map, USDA NAIP</div>
+  </main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+(function(){
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt=n=>n==null||n===0?'–':Number(n).toLocaleString('en-US');
+const money=n=>{if(!n)return '–';if(n>=1e6)return '$'+(n/1e6).toFixed(n>=1e7?0:1)+'M';if(n>=1e3)return '$'+Math.round(n/1e3)+'K';return '$'+n};
+const title=s=>String(s||'').toLowerCase().replace(/\b([a-z])/g,m=>m.toUpperCase()).replace(/\b(Llc|Lp|Ltd|Pllc|Pa|Md|Dds|Inc|Tx|Mob|Usa|Ii|Iii|Ncx|Cvs)\b/g,m=>m.toUpperCase());
+const MI=1609.344;
+function tok(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim()}
+function decode(str){let i=0,lat=0,lng=0,out=[];while(i<str.length){let b,s=0,r=0;do{b=str.charCodeAt(i++)-63;r|=(b&31)<<s;s+=5}while(b>=32);lat+=(r&1)?~(r>>1):(r>>1);s=0;r=0;do{b=str.charCodeAt(i++)-63;r|=(b&31)<<s;s+=5}while(b>=32);lng+=(r&1)?~(r>>1):(r>>1);out.push([lat/1e5,lng/1e5])}return out}
+const STRUCT={'Owner-user suite condo':{k:'own',c:'--green',d:'--green-dk',label:'Owner-user suites'},'Single-owner / controlled':{k:'sgl',c:'--tan',d:'--tan-dk',label:'Single-owner'},'Mixed-use master condo':{k:'mix',c:'--mixed',d:'--muted',label:'Mixed-use master'}};
+const USE={H:['--u-hosp','Hospital'],M:['--u-med','Medical office'],O:['--u-off','Office / flex'],R:['--u-ret','Retail'],I:['--u-ind','Industrial / storage'],A:['--u-apt','Apartments'],C:['--u-oth','Other commercial'],V:[null,'Vacant / land'],Y:[null,'Residential']};
+let P={};function readPalette(){['--on-photo','--u-hosp','--photo-sel','--ink','--muted','--land','--parcel-line','--road','--road-edge','--green','--green-dk','--tan','--tan-dk','--mixed','--u-hosp','--u-med','--u-off','--u-ret','--u-ind','--u-apt','--u-oth','--surface'].forEach(v=>P[v]=tok(v))}
+readPalette();
+
+const map=L.map('map',{preferCanvas:true,zoomControl:false,attributionControl:false,minZoom:9,maxZoom:19,zoomSnap:0.5});
+L.control.zoom({position:'topright'}).addTo(map);
+map.setView([32.83,-96.80],10.5);
+const rRoads=L.canvas({padding:0.4}),rParcels=L.canvas({padding:0.4}),rCondo=L.svg({padding:0.4});
+map.createPane('roads').style.zIndex=410;map.createPane('parcels').style.zIndex=405;map.createPane('condos').style.zIndex=420;map.createPane('rings').style.zIndex=415;map.createPane('labels').style.zIndex=430;
+let mode='aerial';try{const m=localStorage.getItem('hcm-base');if(m==='plan'||m==='aerial')mode=m}catch(e){}
+let BM=null,baseOv=[],baseHosp=[];
+map.createPane('base').style.zIndex=150;
+let focus=null,focusStamp=0;
+let scheme='own';try{const v=localStorage.getItem('hcm-scheme');if(v==='own'||v==='str')scheme=v}catch(e){}
+const OWNC={H:{k:'oh',c:'--u-hosp',d:'--ink',label:'Hospital-owned'},M:{k:'om',c:'--green',d:'--green-dk',label:'Independent · medical'},N:{k:'on',c:'--tan',d:'--tan-dk',label:'Independent · other'}};
+function catOf(c){return scheme==='own'?OWNC[c.oc]:STRUCT[c.s]}
+let D,state={view:'overview',hosp:null,condo:null},condoLayers=[],condoDots=[],parcelGroups=[],ringLayers=[],qLayers=[],roadLayer,roadLabels,hospMarkers=[],selOutline=null;
+
+fetch('basemap.json').then(r=>r.ok?r.json():null).catch(()=>null).then(b=>{BM=b;return fetch('data.json')}).then(r=>{if(!r.ok)throw new Error(r.status);return r.json()}).then(init).catch(e=>{$('#loading').textContent='Map data did not load. Reload the page to try again.'});
+
+function nearestHosp(lat,lon){let best=0,bd=1e9;D.hospitals.forEach((h,i)=>{const dy=h.lat-lat,dx=(h.lon-lon)*0.84,d=dx*dx+dy*dy;if(d<bd){bd=d;best=i}});return best}
+function parcelStyle(c,dim){
+  const st=parcelStyle0(c);if(dim){st.opacity*=.3;if(st.fillOpacity!=null)st.fillOpacity*=.25}return st}
+function parcelStyle0(c){
+  const A=mode==='aerial';
+  if(c==='Y'||c==='V')return A?{renderer:rParcels,pane:'parcels',color:P['--on-photo'],opacity:.28,weight:.6,fill:false,interactive:c==='V'}:{renderer:rParcels,pane:'parcels',color:P['--parcel-line'],opacity:1,weight:.6,fill:false,interactive:c==='V'};
+  const f=P[USE[c][0]];
+  return A?{renderer:rParcels,pane:'parcels',color:f,opacity:.95,weight:1.6,fillColor:f,fillOpacity:c==='H'?.35:.28}:{renderer:rParcels,pane:'parcels',color:P['--parcel-line'],opacity:1,weight:.7,fillColor:f,fillOpacity:c==='H'?.85:.62};
+}
+function condoDim(c){return focus!==null&&!c.near.some(n=>n[0]===D.hospitals[focus].n)}
+function condoStyle(c,sel){const s=catOf(c);const A=mode==='aerial';const dm=!sel&&condoDim(c);
+  const st=A?{renderer:rCondo,pane:'condos',color:sel?P['--photo-sel']:P['--on-photo'],weight:sel?3.5:2,fillColor:P[s.c],fillOpacity:.62,opacity:1}
+            :{renderer:rCondo,pane:'condos',color:sel?P['--ink']:P[s.d],weight:sel?3:1.6,fillColor:P[s.c],fillOpacity:.88,opacity:1};
+  if(dm){st.fillOpacity=.14;st.opacity=.35;st.weight=1}return st}
+function dotStyle(c){const s=catOf(c);const dm=condoDim(c);return {color:P[s.d],fillColor:P[s.c],fillOpacity:dm?.2:.95,opacity:dm?.35:1}}
+function parcelDim(l){return focus!==null&&l._ctr.distanceTo([D.hospitals[focus].lat,D.hospitals[focus].lon])>MI*1.02}
+function ringColor(){return mode==='aerial'?P['--on-photo']:P['--ink']}
+
+function init(data){
+  D=data;
+  // totals
+  const sum=k=>D.condos.reduce((a,c)=>a+(c[k]||0),0);
+  $('#totals').innerHTML=[[sum('cu'),'condo suites within 1 mi'],[sum('mu'),'medical suites'],[sum('ho'),'hospital-owned suites'],[sum('imu'),'independent medical suites']].map(([n,l])=>`<div><b>${fmt(n)}</b><span>${l}</span></div>`).join('');
+  // roads
+  roadLayer=L.layerGroup();roadLabels=[];D.hospitals.forEach(()=>roadLabels.push(L.layerGroup()));
+  const placed={};
+  D.roads.forEach(r=>{const pts=decode(r.g);const w=r.t===1?5:r.t===2?3:1.6;
+    const casing=L.polyline(pts,{renderer:rRoads,pane:'roads',color:P['--road-edge'],weight:w+1.5,interactive:false});
+    const line=L.polyline(pts,{renderer:rRoads,pane:'roads',color:P['--road'],weight:w,interactive:!!r.n});
+    line._t=r.t;casing._t=r.t;casing._casing=true;
+    if(r.n){line.bindTooltip(esc(r.n),{sticky:true,className:'tip',direction:'top',offset:[0,-6]});
+      if(pts.length>1){const m2=(a,b)=>Math.hypot((a[0]-b[0])*111000,(a[1]-b[1])*93500);let len=0;for(let i=1;i<pts.length;i++)len+=m2(pts[i],pts[i-1]);
+        if(len>=110){let acc=0,k=1;for(;k<pts.length;k++){acc+=m2(pts[k],pts[k-1]);if(acc>=len/2)break}k=Math.min(k,pts.length-1);
+          const a=pts[k-1],b=pts[k],mid=[(a[0]+b[0])/2,(a[1]+b[1])/2];const arr=placed[r.n]||(placed[r.n]=[]);
+          if(!arr.some(p=>m2(p,mid)<380)){arr.push(mid);let ang=-Math.atan2((b[0]-a[0]),(b[1]-a[1])*0.84)*180/Math.PI;if(ang>90)ang-=180;if(ang<-90)ang+=180;
+            roadLabels[nearestHosp(mid[0],mid[1])].addLayer(L.marker(mid,{pane:'labels',interactive:false,icon:L.divIcon({className:'road-pin',html:`<span class="road-label" style="transform:translate(-50%,-50%) rotate(${ang.toFixed(0)}deg)">${esc(r.n)}</span>`,iconSize:[0,0],iconAnchor:[0,0]})}))}}}}
+    roadLayer.addLayer(casing);roadLayer.addLayer(line)});
+  // parcels grouped by nearest hospital
+  D.hospitals.forEach(()=>parcelGroups.push(L.layerGroup()));
+  D.parcels.forEach(p=>{const rings=p.g.map(decode);const f=rings[0][0];const lay=L.polygon(rings,parcelStyle(p.c,false));lay._c=p.c;lay._ctr=lay.getBounds().getCenter();
+    if(p.c!=='Y'&&!(p.c==='V'&&!p.o)){lay.on('click',()=>showParcel(p,lay));lay.bindTooltip(esc(p.nm&&p.nm.length<40?title(p.nm):(p.a||USE[p.c][1])),{sticky:true,className:'tip',direction:'top',offset:[0,-6]})}
+    parcelGroups[nearestHosp(f[0],f[1])].addLayer(lay)});
+  // rings + hospitals
+  D.hospitals.forEach((h,i)=>{
+    ringLayers.push(L.circle([h.lat,h.lon],{radius:MI,pane:'rings',color:ringColor(),weight:mode==='aerial'?2:1.4,dashArray:'7 6',fill:true,fillColor:P['--ink'],fillOpacity:mode==='aerial'?0:.025,interactive:false}).addTo(map));
+    qLayers.push(L.circle([h.lat,h.lon],{radius:MI/4,pane:'rings',color:ringColor(),weight:1.2,dashArray:'2 5',fill:false,interactive:false}).addTo(map));
+    const m=L.circleMarker([h.lat,h.lon],{pane:'labels',radius:8,color:P['--surface'],weight:3,fillColor:P['--ink'],fillOpacity:1}).addTo(map);
+    m.bindTooltip(esc(shortName(h.n)),{permanent:true,direction:'right',offset:[10,0],className:'hosp-label perm'});
+    m.on('click',()=>selectHosp(i));hospMarkers.push(m)});
+  // condos
+  D.condos.forEach((c,i)=>{const rings=c.g.map(decode);const lay=L.polygon(rings,condoStyle(c)).addTo(map);
+    const tipf=()=>`<b>${esc(title(c.p))}</b><br>${c.cu} suite${c.cu===1?'':'s'}${c.mu?` · ${c.mu} medical`:''} · ${esc(catOf(c).label)}`;
+    lay.bindTooltip(tipf,{sticky:true,className:'tip',direction:'top',offset:[0,-6]});
+    lay.on('click',e=>{L.DomEvent.stopPropagation(e);selectCondo(i)});condoLayers.push(lay);
+    const b=lay.getBounds().getCenter();
+    const dot=L.circleMarker(b,Object.assign({pane:'condos',renderer:rCondo,radius:Math.max(4,Math.min(13,3+Math.sqrt(c.cu)*1.4)),weight:1.5},dotStyle(c)));
+    dot.bindTooltip(tipf,{className:'tip',direction:'top',offset:[0,-6]});dot.on('click',()=>selectCondo(i));condoDots.push(dot)});
+  ['f-own','f-sgl','f-mix','f-oh','f-om','f-on','l-ctx','l-roads','l-q'].forEach(id=>$('#'+id).addEventListener('change',refresh));
+  $('#s-own').addEventListener('click',()=>setScheme('own'));$('#s-str').addEventListener('click',()=>setScheme('str'));applyScheme();
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('#sheet').hidden)closeNumbers()});
+  $('#b-aerial').addEventListener('click',()=>setMode('aerial'));$('#b-plan').addEventListener('click',()=>setMode('plan'));
+  buildBase();applyModeChrome();
+  map.on('zoomend moveend',refresh);
+  $('#loading').remove();
+  fitAll();renderOverview();refresh();
+  const mq=matchMedia('(prefers-color-scheme: dark)');mq.addEventListener&&mq.addEventListener('change',restyle);
+  new MutationObserver(restyle).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
+}
+function shortName(n){return n.replace(' (incl. Zale Lipshy Pavilion)','').replace('Baylor Scott & White Medical Center - Irving','BSW Irving').replace('Texas Health Presbyterian Hospital Dallas','Texas Health Presbyterian').replace('Methodist Richardson - Campbell Rd Campus','Methodist Richardson (Campbell)').replace('UTSW Clements University Hospital','UTSW Clements').replace('Children\'s Medical Center Dallas','Children\'s Dallas').replace('Advanced Dallas Hospital and Clinics','Advanced Dallas').replace(' Hospital','').replace(' Medical Center','')}
+function fitAll(){map.fitBounds(L.featureGroup(ringLayers).getBounds(),{padding:[20,20]})}
+function structOn(c){return $('#f-'+catOf(c).k).checked}
+function refresh(){
+  const z=map.getZoom(),detail=z>=14.5;
+  map.getContainer().classList.toggle('z-low',z<11.5);
+  $('#zoomhint').hidden=!$('#l-ctx').checked||detail;
+  const vb=map.getBounds().pad(0.25);
+  parcelGroups.forEach((g,i)=>{const h=D.hospitals[i];const want=detail&&$('#l-ctx').checked&&vb.intersects(L.latLng(h.lat,h.lon).toBounds(2.4*MI));if(want&&g._stamp!==focusStamp){g._stamp=focusStamp;g.eachLayer(l=>l.setStyle(parcelStyle(l._c,parcelDim(l))))}if(want&&!map.hasLayer(g))g.addTo(map);if(!want&&map.hasLayer(g))map.removeLayer(g)});
+  updateBase(z);
+  const showRoads=$('#l-roads').checked&&mode==='plan';
+  if(showRoads&&!map.hasLayer(roadLayer))roadLayer.addTo(map);if(!showRoads&&map.hasLayer(roadLayer))map.removeLayer(roadLayer);
+  if(showRoads){roadLayer.eachLayer(l=>{const vis=l._t<3||z>=14.5;l.setStyle({opacity:vis?1:0});if(l.options.interactive!==undefined&&!l._casing){}})}
+  const showLabels=$('#l-roads').checked&&(mode==='plan'?z>=15.5:z>=16.25);
+  roadLabels.forEach((g,i)=>{const h=D.hospitals[i];const w=showLabels&&vb.intersects(L.latLng(h.lat,h.lon).toBounds(2.4*MI));if(w&&!map.hasLayer(g))g.addTo(map);if(!w&&map.hasLayer(g))map.removeLayer(g)});
+  qLayers.forEach(q=>{const w=$('#l-q').checked&&z>=13;if(w&&!map.hasLayer(q))q.addTo(map);if(!w&&map.hasLayer(q))map.removeLayer(q)});
+  D.condos.forEach((c,i)=>{const on=structOn(c);const lay=condoLayers[i],dot=condoDots[i];
+    if(on&&!map.hasLayer(lay))lay.addTo(map);if(!on&&map.hasLayer(lay))map.removeLayer(lay);
+    const dw=on&&z<14.5;if(dw&&!map.hasLayer(dot))dot.addTo(map);if(!dw&&map.hasLayer(dot))map.removeLayer(dot)});
+  autoFocus(z);
+}
+function restyle(){readPalette();
+  focusStamp++;parcelGroups.forEach(g=>{if(map.hasLayer(g)){g._stamp=focusStamp;g.eachLayer(l=>l.setStyle(parcelStyle(l._c,parcelDim(l))))}});
+  roadLayer.eachLayer(l=>l.setStyle({color:l._casing?P['--road-edge']:P['--road']}));
+  ringLayers.forEach((r,i)=>{const dm=focus!==null&&i!==focus;r.setStyle({color:ringColor(),weight:mode==='aerial'?(dm?1.2:2.4):(dm?1:1.6),opacity:dm?.35:1,fillOpacity:mode==='aerial'||dm?0:.025,fillColor:P['--ink']})});
+  qLayers.forEach((r,i)=>r.setStyle({color:ringColor(),opacity:focus!==null&&i!==focus?.25:1}));
+  hospMarkers.forEach((m,i)=>{const dm=focus!==null&&i!==focus;m.setStyle({color:P['--surface'],fillColor:P['--ink'],opacity:dm?.4:1,fillOpacity:dm?.4:1});const t=m.getTooltip()&&m.getTooltip().getElement();if(t)t.classList.toggle('dim',dm)});
+  condoLayers.forEach((l,i)=>l.setStyle(condoStyle(D.condos[i],state.condo===i)));
+  condoDots.forEach((d,i)=>d.setStyle(dotStyle(D.condos[i])));
+  if(selOutline)selOutline.setStyle({color:mode==='aerial'?P['--photo-sel']:P['--ink']});
+}
+function buildBase(){if(!BM)return;
+  const mk=o=>L.imageOverlay(o.f,o.b,{pane:'base',interactive:false});
+  baseOv=[mk(BM.ov12),mk(BM.ov)];
+  baseHosp=BM.hosp.map(h=>({b:L.latLngBounds(h.z16.b),z15:mk(h.z15),z16:mk(h.z16),naip:mk(h.naip)}));
+}
+function updateBase(z){
+  const on=mode==='aerial'&&!!BM;
+  baseOv.forEach(o=>{if(on&&!map.hasLayer(o))o.addTo(map);if(!on&&map.hasLayer(o))map.removeLayer(o)});
+  const vb=map.getBounds(),c=map.getCenter();
+  const vis=baseHosp.map(h=>({h,d:h.b.getCenter().distanceTo(c)})).filter(x=>x.h.b.intersects(vb)).sort((a,b)=>b.d-a.d);
+  const want=new Set();
+  if(on){const lvl=z<12.5?null:z<15?'z15':z<16.25?'z16':'naip';
+    if(lvl)vis.slice(-3).forEach(x=>want.add(x.h[lvl]))}
+  baseHosp.forEach(h=>['z15','z16','naip'].forEach(k=>{const o=h[k];if(want.has(o)){if(!map.hasLayer(o))o.addTo(map)}else if(map.hasLayer(o))map.removeLayer(o)}));
+  vis.forEach(x=>['z15','z16','naip'].forEach(k=>{if(map.hasLayer(x.h[k]))x.h[k].bringToFront()}));
+}
+function applyScheme(){const O=scheme==='own';$('#s-own').setAttribute('aria-pressed',String(O));$('#s-str').setAttribute('aria-pressed',String(!O));
+  $('#row-own').hidden=!O;$('#row-str').hidden=O;document.querySelectorAll('.lg-own').forEach(e=>e.hidden=!O);document.querySelectorAll('.lg-str').forEach(e=>e.hidden=O);
+  $('#legHead').textContent=O?'Condo buildings by ownership':'Condo buildings by structure'}
+function setScheme(v){if(v===scheme)return;scheme=v;try{localStorage.setItem('hcm-scheme',v)}catch(e){}applyScheme();restyle();refresh();rerender()}
+function rerender(){if(state.view==='overview')renderOverview();else if(state.view==='hosp')selectHosp(state.hosp,true,!!state.auto);else if(state.view==='condo'){const i=state.condo,f=state.hosp;state.view='hosp';state.hosp=f;selectCondo(i,true)}}
+const NCOLS=[
+ {k:'n',l:'Hospital',g:'',t:1},{k:'b',l:'Licensed beds',g:''},
+ {k:'u',l:'All condo suites',g:1,sep:1},{k:'mu',l:'Medical suites',g:1},{k:'ho',l:'Hospital-owned',g:1},{k:'ind',l:'Independently owned',g:1},{k:'imu',l:'Independent medical',g:1},{k:'irec',l:'Indep. medical sold in last 3 yrs',g:1},
+ {k:'phOff',l:'Physicians in independent buildings',g:2,sep:1},{k:'phOn',l:'Physicians in hospital-owned buildings',g:2},{k:'cl',l:'All clinicians',g:2}];
+let nsort={k:'b',d:-1};
+function openNumbers(){$('#sheet').hidden=false;renderNumbers();setTimeout(()=>{const x=$('#closeSheet');x&&x.focus()},0)}
+function closeNumbers(){$('#sheet').hidden=true;const b=$('#openNum');b&&b.focus()}
+function renderNumbers(){
+  const rows=D.hospitals.map((h,i)=>({...h,i})).sort((a,b)=>{const x=a[nsort.k],y=b[nsort.k];if(typeof x==='string')return nsort.d*x.localeCompare(y);return nsort.d*((x??-1)-(y??-1))});
+  const T=D.totals||{};const cell=(v,c)=>c.t?`<td>${esc(v)}</td>`:`<td class="n${v===0?' z':''}${c.sep?' sep':''}">${v==null?'…':fmt(v)==='–'?'0':fmt(v)}</td>`;
+  $('#sheetIn').innerHTML=`<div class="sheet-head"><div><div class="eyebrow">Dallas County · within 1 mile of each hospital</div><h2 id="sheetTitle">Supply and demand numbers</h2><p class="sub">Each row counts everything within that hospital's 1-mile ring. Rings overlap in the Medical District and around Presbyterian, so the bottom line counts each suite and each provider once.</p></div><button class="x" id="closeSheet">Close</button></div>
+  <div class="tbl-wrap"><table class="ntbl"><thead><tr class="grow"><th colspan="2"></th><th colspan="6" class="sep gh">Supply · condo suites within 1 mile</th><th colspan="3" class="sep gh">Demand · practicing within 1 mile</th></tr><tr>${NCOLS.map(c=>`<th class="${c.t?'':'n'}${c.sep?' sep':''}" data-k="${c.k}" tabindex="0" ${nsort.k===c.k?`aria-sort="${nsort.d<0?'descending':'ascending'}"`:''}>${c.l}${nsort.k===c.k?(nsort.d<0?' ↓':' ↑'):''}</th>`).join('')}</tr></thead>
+  <tbody>${rows.map(h=>`<tr data-h="${h.i}">${NCOLS.map(c=>cell(h[c.k],c)).join('')}</tr>`).join('')}</tbody>
+  <tfoot><tr>${NCOLS.map(c=>c.k==='n'?'<td>All 15, counted once</td>':c.k==='b'?`<td class="n">${fmt(D.hospitals.reduce((a,h)=>a+h.b,0))}</td>`:cell(T[c.k],c)).join('')}</tr></tfoot></table></div>
+  <div class="defs">
+   <div><b>Condo suites</b> are DCAD commercial condo accounts (office, medical office, flex, retail, industrial) in a condo regime within 1 mile. Parking, land, apartment and hotel units are not counted.</div>
+   <div><b>Medical suites</b> are suites DCAD classes as medical office building or urgent care. That is the building type, not today's tenant.</div>
+   <div><b>Hospital-owned</b> means titled to a hospital or health system: Baylor, the UT System, Encompass Health, and Richardson Medical Center (Methodist Richardson's former name). <b>Independently owned</b> is everyone else, including doctors who hold their suite through an LLC.</div>
+   <div><b>Sold in last 3 years</b> counts independent medical suites whose latest DCAD deed transfer falls in the last 3 years.</div>
+   <div><b>Physicians</b> are individual NPI records with an MD/DO taxonomy whose practice address is within 1 mile. Each address is matched to its DCAD parcel: <b>hospital-owned buildings</b> are hospital campuses and buildings titled to a hospital, health system, UT System or the VA; <b>independent buildings</b> are everything else, including investor-owned MOBs on campus. <b>All clinicians</b> adds dentists, NPs, PAs, therapists and other individual providers.</div>
+   <div><b>Sources:</b> DCAD 2026 roll (posted 10/12/2026); CMS NPI Registry, pulled ${esc(D.npiAsOf||'Nov 2026')}; Census geocoder. NPI addresses are self-reported and can be out of date. Existing stock only, not current listings.</div>
+  </div>`;
+  $('#closeSheet').addEventListener('click',closeNumbers);
+  document.querySelectorAll('.ntbl th[data-k]').forEach(th=>th.addEventListener('click',()=>{const k=th.dataset.k;nsort=nsort.k===k?{k,d:-nsort.d}:{k,d:k==='n'?1:-1};renderNumbers()}));
+  document.querySelectorAll('.ntbl tbody tr').forEach(tr=>tr.addEventListener('click',()=>{closeNumbers();selectHosp(+tr.dataset.h)}));
+}
+function setFocus(i){if(i===focus)return;focus=i;restyle()}
+function autoFocus(z){
+  const c=map.getCenter(),dist=i=>c.distanceTo([D.hospitals[i].lat,D.hospitals[i].lon]);
+  if(z<13){if(focus!==null)setFocus(null);if(state.view!=='overview'){clearSel();renderOverview()}return}
+  if(z<13.5&&focus===null)return;
+  const inside=D.hospitals.map((h,i)=>({i,d:dist(i)})).filter(x=>x.d<=MI).sort((a,b)=>a.d-b.d);
+  const keep=focus!==null&&dist(focus)<=1.6*MI?focus:null;
+  let next;
+  if(state.view==='overview'||state.view==='hosp')next=inside.length?inside[0].i:keep;
+  else next=(focus!==null&&dist(focus)<=MI)?focus:(inside.length?inside[0].i:keep);
+  if(next===focus)return;
+  if(next===null){setFocus(null);if(state.view==='hosp')renderOverview();return}
+  if(state.view==='overview'||state.view==='hosp'){selectHosp(next,true,true)}
+  else{clearSel();selectHosp(next,true,true)}
+}
+function applyModeChrome(){const A=mode==='aerial';$('#map').classList.toggle('aerial',A);
+  $('#b-aerial').setAttribute('aria-pressed',String(A));$('#b-plan').setAttribute('aria-pressed',String(!A));$('#credit').hidden=!A;}
+function setMode(m){if(m===mode)return;mode=m;try{localStorage.setItem('hcm-base',m)}catch(e){}
+  applyModeChrome();restyle();refresh();}
+function setView(html){$('#view').innerHTML=html;if(matchMedia('(max-width:760px)').matches&&state.view!=='overview')$('#view').scrollIntoView({behavior:'smooth',block:'start'})}
+function clearSel(){if(state.condo!=null){condoLayers[state.condo].setStyle(condoStyle(D.condos[state.condo],false))}state.condo=null;if(selOutline){map.removeLayer(selOutline);selOutline=null}}
+
+function renderOverview(){state.view='overview';setFocus(null);
+  const hs=D.hospitals.map((h,i)=>({...h,i})).sort((a,b)=>b.b-a.b);const max=Math.max(...hs.map(h=>h.u),1);
+  setView(`<button class="btn-num" id="openNum">Supply and demand numbers<small>All 15 hospitals in one table →</small></button>
+  <div class="list" style="margin-top:16px"><div class="list-head"><span>Hospital, by beds</span><span>Condo suites</span></div>${hs.map(h=>`<button class="row" data-h="${h.i}"><span class="row-name">${esc(h.n)}</span><span class="row-num">${h.u}<small>${h.mu} medical</small></span><span class="row-meta">${fmt(h.b)} beds · ${h.ho} hospital-owned · ${h.imu} independent medical${h.phOff!=null?` · ${fmt(h.phOff)} physicians in independent buildings`:''}</span><span class="bar"><i style="width:${h.u/max*100}%"></i></span></button>`).join('')}</div>`);
+  $('#openNum').addEventListener('click',openNumbers);
+  document.querySelectorAll('[data-h]').forEach(b=>b.addEventListener('click',()=>selectHosp(+b.dataset.h)));
+}
+function selectHosp(i,keepMap,auto){clearSel();state.view='hosp';state.hosp=i;state.auto=!!auto;const h=D.hospitals[i];setFocus(i);
+  const near=D.hospitals.map((o,j)=>({o,j})).filter(x=>x.j!==i&&L.latLng(h.lat,h.lon).distanceTo([x.o.lat,x.o.lon])<=1.25*MI);
+  if(!keepMap)map.flyToBounds(L.latLng(h.lat,h.lon).toBounds(2.15*MI),{duration:.6});
+  const cs=D.condos.map((c,j)=>({c,j,d:(c.near.find(n=>n[0]===h.n)||[0,99])[1]})).filter(x=>x.d<=1).sort((a,b)=>a.d-b.d);
+  setView(`<button class="back" id="bk">← All hospitals</button>
+  ${auto?'<div class="autonote" style="margin-top:8px"><i></i>Following the map. Zoom out to see all 15 hospitals.</div>':''}
+  <div style="margin-top:10px"><div class="eyebrow">${esc(h.sys)}</div><h2>${esc(h.n)}</h2><p class="sub">${esc(h.ad)} · ${fmt(h.b)} licensed beds</p>
+  ${near.length?`<div class="focusbar">Rings overlap with: ${near.map(x=>`<button class="chip" data-sw="${x.j}">${esc(shortName(x.o.n))}</button>`).join('')}</div>`:''}</div>
+  <dl class="facts" style="margin-top:14px"><h5>Supply · condos within 1 mile</h5><div><dt>Condo suites</dt><dd>${h.u}</dd></div><div><dt>Medical suites</dt><dd>${h.mu}</dd></div><div><dt>Hospital-owned</dt><dd>${h.ho}</dd></div><div><dt>Independently owned</dt><dd>${h.ind}</dd></div><div><dt>Independent medical</dt><dd>${h.imu}</dd></div><div><dt>Indep. medical sold in last 3 yrs</dt><dd>${h.irec}</dd></div><div><dt>Condo buildings</dt><dd>${h.pj}</dd></div><div><dt>Nearest condo</dt><dd>${h.near==null?'none':h.near.toFixed(2)+' mi'}</dd></div>
+  <h5>Demand · practicing within 1 mile</h5><div><dt>Physicians in independent buildings</dt><dd>${h.phOff==null?'…':fmt(h.phOff)}</dd></div><div><dt>Physicians in hospital-owned buildings</dt><dd>${h.phOn==null?'…':fmt(h.phOn)}</dd></div><div style="grid-column:1/-1"><dt>All clinicians (incl. dentists, NPs, PAs, therapists)</dt><dd>${h.cl==null?'…':fmt(h.cl)}</dd></div></dl>
+  ${h.note?`<p class="note" style="margin-top:12px">${esc(h.note)}</p>`:''}
+  <div class="list" style="margin-top:16px"><div class="list-head"><span>Condo buildings by distance</span><span>Suites</span></div>
+  ${cs.length?cs.map(x=>`<button class="row" data-c="${x.j}"><span class="row-name">${esc(title(x.c.p))}</span><span class="row-num">${x.c.cu}<small>${x.c.mu?x.c.mu+' medical':esc(x.c.u)}</small></span><span class="row-meta">${x.d.toFixed(2)} mi · <span class="pill ${catOf(x.c).k}">${esc(catOf(x.c).label)}</span></span></button>`).join(''):'<p class="sub">No commercial condo regimes within 1 mile in the 2026 roll.</p>'}</div>`);
+  $('#bk').addEventListener('click',()=>{clearSel();renderOverview();fitAll()});
+  document.querySelectorAll('[data-c]').forEach(b=>b.addEventListener('click',()=>selectCondo(+b.dataset.c)));
+  document.querySelectorAll('[data-sw]').forEach(b=>b.addEventListener('click',()=>selectHosp(+b.dataset.sw)));
+}
+function selectCondo(i,keepMap){clearSel();state.condo=i;const c=D.condos[i];const lay=condoLayers[i];lay.setStyle(condoStyle(c,true));lay.bringToFront();
+  if(!structOn(c)){$('#f-'+catOf(c).k).checked=true;refresh()}
+  if(!keepMap)map.flyToBounds(lay.getBounds().pad(1.2),{maxZoom:17.5,duration:.6});
+  const from=state.view==='hosp'?state.hosp:D.hospitals.findIndex(h=>h.n===c.near[0][0]);state.view='condo';state.hosp=from;setFocus(from);lay.setStyle(condoStyle(c,true));
+  const counted=c.units.filter(u=>u[7]==='Yes').length;
+  setView(`<button class="back" id="bk">← ${esc(shortName(D.hospitals[from].n))}</button>
+  <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap"><span class="pill ${OWNC[c.oc].k}">${esc(OWNC[c.oc].label)}</span><span class="pill ${STRUCT[c.s].k}">${esc(STRUCT[c.s].label)}</span></div><div><h2 style="margin-top:8px">${esc(title(c.p))}</h2><p class="sub">${esc(title(c.a))}, ${esc(title(c.city))} · DCAD regime ${esc(c.id)}</p></div>
+  <dl class="facts" style="margin-top:14px"><div><dt>Condo suites</dt><dd>${c.cu}</dd></div><div><dt>Medical suites</dt><dd>${c.mu}</dd></div><div><dt>Hospital-owned</dt><dd>${c.ho}</dd></div><div><dt>Independent medical</dt><dd>${c.imu}</dd></div><div><dt>Building SF (DCAD)</dt><dd>${fmt(c.sf)}</dd></div><div><dt>Avg SF per unit</dt><dd>${c.sf&&c.cu?fmt(Math.round(c.sf/c.cu)):'–'}</dd></div><div><dt>Earliest year built</dt><dd>${c.y||'–'}</dd></div><div><dt>Distinct owners</dt><dd>${c.ow}</dd></div><div><dt>DCAD 2026 value</dt><dd>${money(c.val)}</dd></div><div><dt>Latest deed transfer</dt><dd>${c.deed||'–'}</dd></div><div style="grid-column:1/-1"><dt>Largest owner</dt><dd class="txt">${esc(title(c.lo))}</dd></div><div style="grid-column:1/-1"><dt>Use mix</dt><dd class="txt">${esc(c.mix)}</dd></div></dl>
+  <div style="margin-top:14px"><div class="eyebrow" style="margin-bottom:4px">Distance to hospitals</div><div class="dist">${c.near.map(n=>`<div><span>${esc(n[0])}</span><span>${n[1].toFixed(2)} mi</span></div>`).join('')}</div></div>
+  <div style="margin-top:16px"><div class="eyebrow" style="margin-bottom:6px">Units (${c.units.length})${counted<c.units.length?` · grey rows not counted`:''} · <span class="med"></span> medical-named owner</div>
+  <div class="tbl-wrap"><table><thead><tr><th>Unit</th><th>Owner</th><th>Use</th><th class="n">SF</th><th class="n">Value</th><th>Deed</th></tr></thead><tbody>
+  ${c.units.map(u=>`<tr class="${u[7]==='Yes'?'':'excl'}"><td><a href="https://www.dallascad.org/AcctDetailCom.aspx?ID=${encodeURIComponent(u[9])}" target="_blank" rel="noopener">${esc(u[0]||'–')}</a></td><td>${esc(title(u[1]))}${u[11]==='H'?'<span class="otag" title="Hospital or health system">Hospital</span>':''}${u[8]?'<span class="med" title="Medical-named owner"></span>':''}</td><td>${esc(u[2].replace(' (excluded)',''))}</td><td class="n">${fmt(u[3])}</td><td class="n">${money(u[5])}</td><td class="n">${u[6]?u[6].slice(0,7):'–'}</td></tr>`).join('')}
+  </tbody></table></div><p class="sub" style="font-size:11.5px">Unit links open the DCAD account page.</p></div>`);
+  $('#bk').addEventListener('click',()=>{clearSel();selectHosp(from)});
+}
+function showParcel(p,lay){clearSel();
+  selOutline=L.polygon(lay.getLatLngs(),{renderer:rCondo,pane:'condos',color:P['--ink'],weight:2.5,fill:false,interactive:false}).addTo(map);
+  const from=state.view==='hosp'||state.view==='condo'||state.view==='parcel'?state.hosp:nearestHosp(lay.getBounds().getCenter().lat,lay.getBounds().getCenter().lng);state.view='parcel';state.hosp=from;setFocus(from);
+  const useLabel=USE[p.c][1];
+  setView(`<button class="back" id="bk">← ${esc(shortName(D.hospitals[from].n))}</button>
+  <div style="margin-top:10px"><div class="eyebrow">${esc(useLabel)} parcel</div><h2>${esc(p.nm&&p.nm!=='VACANT'?title(p.nm):title(p.a||'Unaddressed parcel'))}</h2><p class="sub">${esc(title(p.a||''))}</p></div>
+  <dl class="facts" style="margin-top:14px"><div style="grid-column:1/-1"><dt>Owner (primary account)</dt><dd class="txt">${esc(title(p.o||'–'))}</dd></div><div style="grid-column:1/-1"><dt>DCAD building class</dt><dd class="txt">${esc(title(p.k||useLabel))}</dd></div><div><dt>Building SF</dt><dd>${fmt(p.sf)}</dd></div><div><dt>Year built</dt><dd>${p.y||'–'}</dd></div><div><dt>DCAD 2026 value</dt><dd>${money(p.v)}</dd></div><div><dt>Accounts on parcel</dt><dd>${p.n||1}</dd></div></dl>
+  ${p.ac?`<p class="sub"><a href="https://www.dallascad.org/AcctDetailCom.aspx?ID=${encodeURIComponent(p.ac)}" target="_blank" rel="noopener">Open DCAD account ${esc(p.ac)}</a></p>`:''}
+  <p class="note" style="margin-top:10px">Not a condo regime. Shown for context: medical office and office buildings here are the lease-side competition for a condo conversion.</p>`);
+  $('#bk').addEventListener('click',()=>{clearSel();selectHosp(from,true)});
+}
+})();
+</script>
+
+</body>
+</html>
