@@ -330,7 +330,10 @@ function init(data){
   new MutationObserver(restyle).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
 }
 function shortName(n){return n.replace(' (incl. Zale Lipshy Pavilion)','').replace('Baylor Scott & White Medical Center - Irving','BSW Irving').replace('Texas Health Presbyterian Hospital Dallas','Texas Health Presbyterian').replace('Methodist Richardson - Campbell Rd Campus','Methodist Richardson (Campbell)').replace('UTSW Clements University Hospital','UTSW Clements').replace('Children\'s Medical Center Dallas','Children\'s Dallas').replace('Advanced Dallas Hospital and Clinics','Advanced Dallas').replace(' Hospital','').replace(' Medical Center','')}
-function fitAll(){map.fitBounds(L.featureGroup(ringLayers).getBounds(),{padding:[20,20]})}
+// Fitting into a 0-size box (hidden or still-opening pane) jumps to maxZoom, so wait for a real size.
+let fitPending=false;
+function fitAll(){map.invalidateSize();const s=map.getSize();if(s.x<50||s.y<50){fitPending=true;return}fitPending=false;map.fitBounds(L.featureGroup(ringLayers).getBounds(),{padding:[20,20]})}
+new ResizeObserver(()=>{map.invalidateSize();if(fitPending)fitAll()}).observe(map.getContainer());
 function structOn(c){return $('#f-'+catOf(c).k).checked}
 function refresh(){
   const z=map.getZoom(),detail=z>=14.5;
