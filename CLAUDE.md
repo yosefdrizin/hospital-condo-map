@@ -37,7 +37,8 @@ Publish: commit and push `docs/`. GitHub Pages serves `docs/` from the main bran
 | 3 | 03_npi.py | NPI Registry pull by ZIP, Census geocoding, building ownership, physician counts | data/processed/npi_counts.json |
 | 4 | 04_basemap.py | USGS Imagery Topo tiles + USDA NAIP aerials stitched per hospital | docs/img/, docs/basemap.json |
 | 5 | 05_build_site.py | Everything the page needs | docs/data.json |
-| 6 | 06_build_excel.py | Plain internal workbook | outputs/*.xlsx |
+| 6 | 06_build_excel.py | Plain internal workbook (committed, so effectively public) | outputs/*.xlsx |
+| 7 | 07_targets.py | PRIVATE conversion candidates workbook: owner names + mailing addresses | outputs/private/ (git-ignored) |
 
 Shared logic lives in `pipeline/common.py`: paths, settings, ownership regexes, use buckets, polyline encoding.
 Hospitals are in `config/hospitals.csv` (name, system, address, beds, lat/lon, notes). Knobs are in `config/settings.json`.
@@ -54,13 +55,20 @@ Hospitals are in `config/hospitals.csv` (name, system, address, beds, lat/lon, n
 - **Building ownership for physicians**: a practice address is "hospital-owned building" if its DCAD parcel is hospital class,
   owned by a hospital/health system/UT System/VA, or contains a hospital point. Investor-owned MOBs on campus count as independent.
 - **Physicians**: NPI-1 records with primary taxonomy starting `20` (MD/DO). "All clinicians" = every individual NPI record.
+- **Dentists / other outpatient**: taxonomy groups in `common.PROVIDER_GROUPS` (dentists 1223*; other outpatient = chiro, PT, OT,
+  optometry, podiatry, psychology, counseling, clinical social work, MFT, audiology, speech). NPs/PAs are in All clinicians only.
+- **Practice locations**: distinct building + suite among physicians, dentists and other outpatient in independent buildings.
+- **Conversion candidates** (private workbook only): non-condo office / medical office / retail parcel within 1 mile, one titled owner,
+  not hospital or health system, 2,500+ SF. Never put this list, owner mailing addresses or the outputs/private folder in docs/ or git.
 - **Structure** (secondary view): owner-user suites (fragmented ownership), single-owner/controlled (one owner 75%+),
   mixed-use master (commercial units inside an apartment/garage regime).
 
 ## Current numbers (built 2026-11-02 from the DCAD 2026 roll posted 10/12/2026)
 300 condo suites within 1 mile of the 15 hospitals; 135 medical; 40 hospital-owned; 106 independent medical;
-9 independent medical suites sold in the last 3 years. Physicians within 1 mile: 1,737 in independent buildings,
-6,180 in hospital-owned buildings; 23,548 individual clinicians. If a rebuild changes these, say so.
+9 independent medical suites sold in the last 3 years. Within 1 mile (NPI pulled 2026-11-02), independent buildings:
+1,738 physicians, 407 dentists, 1,962 other outpatient, 1,499 practice locations; hospital-owned buildings: 6,179 physicians,
+334 dentists, 1,342 other outpatient; 23,552 individual clinicians. Private workbook: 1,545 conversion candidates.
+If a rebuild changes these, say so.
 
 ## The page (docs/index.html)
 Single file, Leaflet 1.9.4 from cdnjs. Loads `data.json` and `basemap.json`. Features: Aerial/Plan basemap toggle,

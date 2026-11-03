@@ -2,7 +2,7 @@
 
   python pipeline/run_all.py                 # everything (downloads skipped when files exist)
   python pipeline/run_all.py --skip-imagery  # skip the slow aerial step (keeps existing docs/img)
-  python pipeline/run_all.py --only 5 6      # just rebuild the site data and Excel
+  python pipeline/run_all.py --only 5 6 7    # just rebuild the site data, Excel and private candidates workbook
   python pipeline/run_all.py --refresh-dcad --refresh-npi   # force fresh downloads
 """
 import argparse
@@ -13,7 +13,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-STEPS = {1: "01_download", 2: "02_condos", 3: "03_npi", 4: "04_basemap", 5: "05_build_site", 6: "06_build_excel"}
+STEPS = {1: "01_download", 2: "02_condos", 3: "03_npi", 4: "04_basemap", 5: "05_build_site", 6: "06_build_excel",
+         7: "07_targets"}
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--only", nargs="*", type=int)

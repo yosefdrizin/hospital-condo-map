@@ -139,6 +139,14 @@ a{color:var(--green-dk);text-underline-offset:2px}
 .btn-num:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 .btn-num small{font-family:var(--f-body);font-weight:400;font-size:12px;color:var(--muted);letter-spacing:0}
 .facts h5{grid-column:1/-1;margin:0;padding:10px 0 4px;font-family:var(--f-display);font-weight:600;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--rule)}
+.facts h6{grid-column:1/-1;margin:0;padding:8px 0 2px;font-size:12px;font-weight:600;color:var(--ink);border-bottom:1px solid var(--rule)}
+.fnote{grid-column:1/-1;margin:0;padding:4px 0 6px;font-size:11.5px;color:var(--muted);border-bottom:1px solid var(--rule)}
+.info{all:unset;cursor:pointer;display:inline-grid;place-items:center;width:14px;height:14px;margin-left:5px;border:1px solid var(--muted);border-radius:50%;font-size:9.5px;font-weight:700;font-style:italic;font-family:Georgia,serif;color:var(--muted);vertical-align:1px}
+.info:hover,.info[aria-expanded="true"]{border-color:var(--ink);color:var(--ink)}
+.info:focus-visible{outline:2px solid var(--focus);outline-offset:1px}
+.defrow{grid-column:1/-1;margin:0;padding:8px 10px;font-size:12px;line-height:1.45;color:var(--ink);background:var(--canvas);border-bottom:1px solid var(--rule)}
+.defs p{margin:5px 0 0}
+.defs .gl{display:block;font-family:var(--f-display);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink)}
 .otag{display:inline-block;font-size:10px;font-weight:600;padding:0 4px;border-radius:2px;margin-left:5px;vertical-align:1px;border:1px solid var(--rule);color:var(--muted)}
 .sheet{position:fixed;inset:0;z-index:1000;background:var(--surface);overflow:auto;padding-block:max(20px,env(safe-area-inset-top,0px)) max(28px,env(safe-area-inset-bottom,0px));padding-left:max(24px,env(safe-area-inset-left,0px));padding-right:max(24px,env(safe-area-inset-right,0px))}
 .sheet-in{max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
@@ -332,6 +340,15 @@ function init(data){
 function shortName(n){return n.replace(' (incl. Zale Lipshy Pavilion)','').replace('Baylor Scott & White Medical Center - Irving','BSW Irving').replace('Texas Health Presbyterian Hospital Dallas','Texas Health Presbyterian').replace('Methodist Richardson - Campbell Rd Campus','Methodist Richardson (Campbell)').replace('UTSW Clements University Hospital','UTSW Clements').replace('Children\'s Medical Center Dallas','Children\'s Dallas').replace('Advanced Dallas Hospital and Clinics','Advanced Dallas').replace(' Hospital','').replace(' Medical Center','')}
 // Fitting into a 0-size box (hidden or still-opening pane) jumps to maxZoom, so wait for a real size.
 let fitPending=false;
+// One number in a hospital panel: plain label, (i) button that opens the exact definition underneath
+function fact(k,v,txt){const f=DEF[k];return `<div><dt>${esc(f.p)}<button class="info" data-def="${k}" aria-expanded="false" aria-label="What is ${esc(f.p)}?" title="${esc(f.d)}">i</button></dt><dd${txt?' class="txt"':''}>${typeof v==='number'?fmt(v)==='–'?'0':fmt(v):v==null?'…':esc(v)}</dd></div>`}
+document.addEventListener('click',e=>{const b=e.target.closest('.info');if(!b)return;
+  const item=b.closest('div'),open=item.parentNode.querySelector(`.defrow[data-for="${b.dataset.def}"]`);
+  item.parentNode.querySelectorAll('.defrow').forEach(r=>r.remove());item.parentNode.querySelectorAll('.info').forEach(x=>x.setAttribute('aria-expanded','false'));
+  if(open)return;
+  const nx=item.nextElementSibling,after=nx&&nx.tagName==='DIV'&&!nx.classList.contains('defrow')&&nx.offsetLeft>item.offsetLeft?nx:item;
+  const r=document.createElement('p');r.className='defrow';r.dataset.for=b.dataset.def;r.innerHTML=`<b>${esc(DEF[b.dataset.def].p)}:</b> ${esc(DEF[b.dataset.def].d)}`;
+  after.after(r);b.setAttribute('aria-expanded','true')});
 function fitAll(){map.invalidateSize();const s=map.getSize();if(s.x<50||s.y<50){fitPending=true;return}fitPending=false;map.fitBounds(L.featureGroup(ringLayers).getBounds(),{padding:[20,20]})}
 new ResizeObserver(()=>{map.invalidateSize();if(fitPending)fitAll()}).observe(map.getContainer());
 function structOn(c){return $('#f-'+catOf(c).k).checked}
@@ -384,10 +401,33 @@ function applyScheme(){const O=scheme==='own';$('#s-own').setAttribute('aria-pre
   $('#legHead').textContent=O?'Condo buildings by ownership':'Condo buildings by structure'}
 function setScheme(v){if(v===scheme)return;scheme=v;try{localStorage.setItem('hcm-scheme',v)}catch(e){}applyScheme();restyle();refresh();rerender()}
 function rerender(){if(state.view==='overview')renderOverview();else if(state.view==='hosp')selectHosp(state.hosp,true,!!state.auto);else if(state.view==='condo'){const i=state.condo,f=state.hosp;state.view='hosp';state.hosp=f;selectCondo(i,true)}}
+// One place for every number's label and exact definition: p = panel label, t = table header, d = definition (info button + table notes)
+const OTH='chiropractic, physical and occupational therapy, optometry, podiatry, psychology, counseling, clinical social work, marriage and family therapy, audiology, speech';
+const INDB='a building not owned by a hospital or health system (investor-owned MOBs on a campus count here)';
+const HOSB='a hospital campus building, or a building titled to a hospital, health system, UT System or the VA';
+const DEF={
+ u:{p:'Condo suites, all uses',t:'Condo suites, all uses',d:'Commercial condo suites (each its own DCAD account, sellable on its own) in a condo project whose parcel is within 1 mile of the hospital campus point. Office, medical, flex, retail and industrial. Parking, land, apartment and hotel units are not counted.'},
+ mu:{p:'Medical suites',t:'Medical suites',d:'Condo suites DCAD classes as Medical Office Building or Urgent Care Clinic. This is the building type, not who occupies the suite today.'},
+ ho:{p:'Owned by a hospital system',t:'Owned by a hospital system',d:'Suites titled to a hospital or health system: Baylor, the UT System, Encompass Health, and Richardson Medical Center (Methodist Richardson\'s former name). Based on the owner name on the DCAD roll.'},
+ ind:{p:'Owned independently',t:'Owned independently',d:'Suites owned by anyone other than a hospital system: doctors, practices, LLCs and investors. Doctors often hold suites through LLCs, so practice owners and investors are not split apart.'},
+ imu:{p:'Independent medical suites',t:'Independent medical suites',d:'Medical suites not owned by a hospital system. Existing stock, not current listings.'},
+ irec:{p:'Independent medical suites sold, last 3 yrs',t:'Independent medical sold, last 3 yrs',d:'Independent medical suites whose latest DCAD deed transfer is within the last 3 years. Shows how often this stock changes hands.'},
+ pj:{p:'Condo buildings',d:'Condo projects (DCAD condo regimes) within 1 mile that hold at least one counted suite.'},
+ near:{p:'Nearest condo building',d:'Distance from the hospital campus point to the edge of the closest condo project parcel.'},
+ phOff:{p:'Physicians (MD/DO)',t:'Physicians (MD/DO)',d:`Individual providers with a physician (MD or DO) specialty whose registered practice address is within 1 mile and in ${INDB}. Each person counts once.`},
+ dnOff:{p:'Dentists',t:'Dentists',d:`Individual dentists (all dental specialties) whose registered practice address is within 1 mile and in ${INDB}.`},
+ otOff:{p:'Other outpatient providers',t:'Other outpatient',d:`Individual providers in ${OTH}, whose registered practice address is within 1 mile and in ${INDB}.`},
+ pxOff:{p:'Practice locations',t:'Practice locations',d:'Distinct building + suite addresses among the physicians, dentists and other outpatient providers in independent buildings. Several providers sharing one suite count once, so this approximates the number of separate practices. Approximate: many registry addresses leave out the suite, which undercounts.'},
+ phOn:{p:'Physicians (MD/DO)',t:'Physicians (MD/DO)',d:`Physicians (MD or DO) whose registered practice address is within 1 mile and in ${HOSB}.`},
+ dnOn:{p:'Dentists',t:'Dentists',d:`Dentists whose registered practice address is within 1 mile and in ${HOSB}.`},
+ otOn:{p:'Other outpatient providers',t:'Other outpatient',d:`Providers in ${OTH}, whose registered practice address is within 1 mile and in ${HOSB}.`},
+ cl:{p:'All individual clinicians',t:'All individual clinicians',d:'Every individual provider with a registered practice address within 1 mile, in any building. Adds nurse practitioners, physician assistants, nurses, pharmacists and others to the groups above. Shows the size of the medical community, not a count of buyers.'}};
 const NCOLS=[
  {k:'n',l:'Hospital',g:'',t:1},{k:'b',l:'Licensed beds',g:''},
- {k:'u',l:'All condo suites',g:1,sep:1},{k:'mu',l:'Medical suites',g:1},{k:'ho',l:'Hospital-owned',g:1},{k:'ind',l:'Independently owned',g:1},{k:'imu',l:'Independent medical',g:1},{k:'irec',l:'Indep. medical sold in last 3 yrs',g:1},
- {k:'phOff',l:'Physicians in independent buildings',g:2,sep:1},{k:'phOn',l:'Physicians in hospital-owned buildings',g:2},{k:'cl',l:'All clinicians',g:2}];
+ {k:'u',g:1,sep:1},{k:'mu',g:1},{k:'ho',g:1},{k:'ind',g:1},{k:'imu',g:1},{k:'irec',g:1},
+ {k:'phOff',g:2,sep:1},{k:'dnOff',g:2},{k:'otOff',g:2},{k:'pxOff',g:2},
+ {k:'phOn',g:3,sep:1},{k:'dnOn',g:3},{k:'otOn',g:3},{k:'cl',g:4,sep:1}].map(c=>DEF[c.k]?{...c,l:DEF[c.k].t,d:DEF[c.k].d}:c);
+const NGROUPS=[['',2],['Supply · condo suites within 1 mile',6],['Demand · providers in independent buildings',4],['Demand · providers in hospital-owned buildings',3],['Everyone',1]];
 let nsort={k:'b',d:-1};
 function openNumbers(){$('#sheet').hidden=false;renderNumbers();setTimeout(()=>{const x=$('#closeSheet');x&&x.focus()},0)}
 function closeNumbers(){$('#sheet').hidden=true;const b=$('#openNum');b&&b.focus()}
@@ -395,15 +435,12 @@ function renderNumbers(){
   const rows=D.hospitals.map((h,i)=>({...h,i})).sort((a,b)=>{const x=a[nsort.k],y=b[nsort.k];if(typeof x==='string')return nsort.d*x.localeCompare(y);return nsort.d*((x??-1)-(y??-1))});
   const T=D.totals||{};const cell=(v,c)=>c.t?`<td>${esc(v)}</td>`:`<td class="n${v===0?' z':''}${c.sep?' sep':''}">${v==null?'…':fmt(v)==='–'?'0':fmt(v)}</td>`;
   $('#sheetIn').innerHTML=`<div class="sheet-head"><div><div class="eyebrow">Dallas County · within 1 mile of each hospital</div><h2 id="sheetTitle">Supply and demand numbers</h2><p class="sub">Each row counts everything within that hospital's 1-mile ring. Rings overlap in the Medical District and around Presbyterian, so the bottom line counts each suite and each provider once.</p></div><button class="x" id="closeSheet">Close</button></div>
-  <div class="tbl-wrap"><table class="ntbl"><thead><tr class="grow"><th colspan="2"></th><th colspan="6" class="sep gh">Supply · condo suites within 1 mile</th><th colspan="3" class="sep gh">Demand · practicing within 1 mile</th></tr><tr>${NCOLS.map(c=>`<th class="${c.t?'':'n'}${c.sep?' sep':''}" data-k="${c.k}" tabindex="0" ${nsort.k===c.k?`aria-sort="${nsort.d<0?'descending':'ascending'}"`:''}>${c.l}${nsort.k===c.k?(nsort.d<0?' ↓':' ↑'):''}</th>`).join('')}</tr></thead>
+  <div class="tbl-wrap"><table class="ntbl"><thead><tr class="grow">${NGROUPS.map(([l,n],i)=>`<th colspan="${n}"${i?' class="sep gh"':''}>${l}</th>`).join('')}</tr><tr>${NCOLS.map(c=>`<th class="${c.t?'':'n'}${c.sep?' sep':''}" data-k="${c.k}" tabindex="0"${c.d?` title="${esc(c.d)}"`:''} ${nsort.k===c.k?`aria-sort="${nsort.d<0?'descending':'ascending'}"`:''}>${c.l}${nsort.k===c.k?(nsort.d<0?' ↓':' ↑'):''}</th>`).join('')}</tr></thead>
   <tbody>${rows.map(h=>`<tr data-h="${h.i}">${NCOLS.map(c=>cell(h[c.k],c)).join('')}</tr>`).join('')}</tbody>
   <tfoot><tr>${NCOLS.map(c=>c.k==='n'?'<td>All 15, counted once</td>':c.k==='b'?`<td class="n">${fmt(D.hospitals.reduce((a,h)=>a+h.b,0))}</td>`:cell(T[c.k],c)).join('')}</tr></tfoot></table></div>
+  <p class="sub" style="margin-top:14px"><b>How to read it:</b> supply columns count <b>suites</b>; demand columns count <b>people</b>, one per provider, placed by their registered practice address. Hover a column header for its definition.</p>
   <div class="defs">
-   <div><b>Condo suites</b> are DCAD commercial condo accounts (office, medical office, flex, retail, industrial) in a condo regime within 1 mile. Parking, land, apartment and hotel units are not counted.</div>
-   <div><b>Medical suites</b> are suites DCAD classes as medical office building or urgent care. That is the building type, not today's tenant.</div>
-   <div><b>Hospital-owned</b> means titled to a hospital or health system: Baylor, the UT System, Encompass Health, and Richardson Medical Center (Methodist Richardson's former name). <b>Independently owned</b> is everyone else, including doctors who hold their suite through an LLC.</div>
-   <div><b>Sold in last 3 years</b> counts independent medical suites whose latest DCAD deed transfer falls in the last 3 years.</div>
-   <div><b>Physicians</b> are individual NPI records with an MD/DO taxonomy whose practice address is within 1 mile. Each address is matched to its DCAD parcel: <b>hospital-owned buildings</b> are hospital campuses and buildings titled to a hospital, health system, UT System or the VA; <b>independent buildings</b> are everything else, including investor-owned MOBs on campus. <b>All clinicians</b> adds dentists, NPs, PAs, therapists and other individual providers.</div>
+   ${NGROUPS.slice(1).map(([gl],gi)=>`<div><b class="gl">${gl}</b>${NCOLS.filter(c=>c.g===gi+1).map(c=>`<p><b>${esc(c.l)}:</b> ${esc(c.d)}</p>`).join('')}</div>`).join('')}
    <div><b>Sources:</b> DCAD 2026 roll (posted 10/12/2026); CMS NPI Registry, pulled ${esc(D.npiAsOf||'Nov 2026')}; Census geocoder. NPI addresses are self-reported and can be out of date. Existing stock only, not current listings.</div>
   </div>`;
   $('#closeSheet').addEventListener('click',closeNumbers);
@@ -447,8 +484,12 @@ function selectHosp(i,keepMap,auto){clearSel();state.view='hosp';state.hosp=i;st
   ${auto?'<div class="autonote" style="margin-top:8px"><i></i>Following the map. Zoom out to see all 15 hospitals.</div>':''}
   <div style="margin-top:10px"><div class="eyebrow">${esc(h.sys)}</div><h2>${esc(h.n)}</h2><p class="sub">${esc(h.ad)} · ${fmt(h.b)} licensed beds</p>
   ${near.length?`<div class="focusbar">Rings overlap with: ${near.map(x=>`<button class="chip" data-sw="${x.j}">${esc(shortName(x.o.n))}</button>`).join('')}</div>`:''}</div>
-  <dl class="facts" style="margin-top:14px"><h5>Supply · condos within 1 mile</h5><div><dt>Condo suites</dt><dd>${h.u}</dd></div><div><dt>Medical suites</dt><dd>${h.mu}</dd></div><div><dt>Hospital-owned</dt><dd>${h.ho}</dd></div><div><dt>Independently owned</dt><dd>${h.ind}</dd></div><div><dt>Independent medical</dt><dd>${h.imu}</dd></div><div><dt>Indep. medical sold in last 3 yrs</dt><dd>${h.irec}</dd></div><div><dt>Condo buildings</dt><dd>${h.pj}</dd></div><div><dt>Nearest condo</dt><dd>${h.near==null?'none':h.near.toFixed(2)+' mi'}</dd></div>
-  <h5>Demand · practicing within 1 mile</h5><div><dt>Physicians in independent buildings</dt><dd>${h.phOff==null?'…':fmt(h.phOff)}</dd></div><div><dt>Physicians in hospital-owned buildings</dt><dd>${h.phOn==null?'…':fmt(h.phOn)}</dd></div><div style="grid-column:1/-1"><dt>All clinicians (incl. dentists, NPs, PAs, therapists)</dt><dd>${h.cl==null?'…':fmt(h.cl)}</dd></div></dl>
+  <dl class="facts" style="margin-top:14px"><h5>Supply · condo suites within 1 mile</h5><p class="fnote">Counts suites, from the DCAD ${esc(D.asof.replace('DCAD ',''))}.</p>
+  ${['u','mu','ho','ind','imu','irec','pj'].map(k=>fact(k,h[k])).join('')}${fact('near',h.near==null?'none':h.near.toFixed(2)+' mi',1)}
+  <h5>Demand · providers practicing within 1 mile</h5><p class="fnote">Counts people, one per provider, by registered practice address (CMS NPI Registry, pulled ${esc(D.npiAsOf||'')}).</p>
+  <h6>In independent buildings</h6>${['phOff','dnOff','otOff','pxOff'].map(k=>fact(k,h[k])).join('')}
+  <h6>In hospital-owned buildings</h6>${['phOn','dnOn','otOn'].map(k=>fact(k,h[k])).join('')}
+  <h6>Everyone</h6>${fact('cl',h.cl)}</dl>
   ${h.note?`<p class="note" style="margin-top:12px">${esc(h.note)}</p>`:''}
   <div class="list" style="margin-top:16px"><div class="list-head"><span>Condo buildings by distance</span><span>Suites</span></div>
   ${cs.length?cs.map(x=>`<button class="row" data-c="${x.j}"><span class="row-name">${esc(title(x.c.p))}</span><span class="row-num">${x.c.cu}<small>${x.c.mu?x.c.mu+' medical':esc(x.c.u)}</small></span><span class="row-meta">${x.d.toFixed(2)} mi · <span class="pill ${catOf(x.c).k}">${esc(catOf(x.c).label)}</span></span></button>`).join(''):'<p class="sub">No commercial condo regimes within 1 mile in the 2026 roll.</p>'}</div>`);

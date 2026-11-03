@@ -119,6 +119,30 @@ def use_category(bldg_class: str, sptd: str) -> str:
     return "Other commercial"
 
 
+# ---------- provider groups (NUCC taxonomy code prefixes on the NPI record) ----------
+# ph = physicians (MD/DO), dn = dentists, ot = other outpatient practitioners who commonly own their suite:
+# chiropractic, PT, OT, optometry, podiatry, psychology, counseling, clinical social work, MFT, audiology, speech.
+# NPs, PAs, nurses, pharmacists etc. are "xx": in All clinicians only, since they usually work inside someone else's practice.
+PROVIDER_GROUPS = {"ph": ("20",), "dn": ("1223",),
+                   "ot": ("111N", "2251", "225X", "152W", "213E", "103T", "101Y", "1041", "106H", "231H", "235Z")}
+PROVIDER_GROUP_LABELS = {"ph": "Physician (MD/DO)", "dn": "Dentist", "ot": "Other outpatient", "xx": "Other clinician"}
+OWNER_USER_GROUPS = ("ph", "dn", "ot")
+
+
+def provider_group(tcode) -> str:
+    t = tcode if isinstance(tcode, str) else ""
+    for k, prefixes in PROVIDER_GROUPS.items():
+        if t.startswith(prefixes):
+            return k
+    return "xx"
+
+
+def suite_of(a: str) -> str:
+    """Suite / unit token from an NPI address line, '' if none."""
+    m = re.search(r"\b(?:STE|SUITE|UNIT|RM|ROOM|BLDG|BUILDING)\s*#?\s*([A-Z0-9-]+)|#\s*([A-Z0-9-]+)", (a or "").upper())
+    return (m.group(1) or m.group(2)) if m else ""
+
+
 def recent_cutoff() -> str:
     y = SETTINGS.get("recent_sale_years", 3)
     t = date.today()

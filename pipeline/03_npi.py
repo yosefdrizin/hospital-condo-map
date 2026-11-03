@@ -5,8 +5,9 @@
    large ZIPs are split by two-letter last-name prefix (recursively).
 2. Geocode unique practice addresses with the Census batch geocoder; fall back to DCAD address match.
 3. Match each address to its DCAD parcel and flag hospital / health-system-owned buildings.
-4. Count per hospital within the radius: physicians (MD/DO taxonomy 20*) in independent vs
-   hospital-owned buildings, and all individual clinicians.
+4. Count per hospital within the radius, in independent vs hospital-owned buildings: physicians (MD/DO),
+   dentists and other outpatient (groups in common.PROVIDER_GROUPS); practice locations (building + suite) in
+   independent buildings; and all individual clinicians.
 
 Cache: data/cache/npi/<zip>.jsonl and data/cache/geocode.csv. Delete them to force a fresh pull.
 Outputs: data/processed/npi_counts.json, data/processed/npi_providers_near.csv
@@ -26,8 +27,8 @@ import numpy as np
 import pandas as pd
 import requests
 
-from common import (CACHE, CONFIG, CRS_FT, HEALTH_SYSTEM_PARCEL_RE, MILE_FT, PROC, RAW, SETTINGS, UA, find_one, log,
-                    norm_street, strip_suite)
+from common import (CACHE, CONFIG, CRS_FT, HEALTH_SYSTEM_PARCEL_RE, MILE_FT, OWNER_USER_GROUPS, PROC, RAW, SETTINGS, UA,
+                    find_one, log, norm_street, provider_group, strip_suite, suite_of)
 
 NPI_API = "https://npiregistry.cms.hhs.gov/api/"
 NPI_DIR = CACHE / "npi"
@@ -223,17 +224,33 @@ def main(refresh=False):
     nn = nn[~nn.index.duplicated()]
     g.loc[miss, "par"] = nn.Acct.map(lambda a: {a} if isinstance(a, str) else None)
     g["hs_bldg"] = g.par.map(lambda s: bool(s) and len(s & hs_par) > 0)
-    g["phys"] = g.tcode.fillna("").str.startswith("20")
+    g["grp"] = g.tcode.map(provider_group)
+    g["phys"] = g.grp.eq("ph")
+    # practice location = building + suite; providers sharing one are one potential suite buyer
+    g["ploc"] = g.k2.fillna(g.key) + "|" + (g.a1.fillna("") + " " + g.a2.fillna("")).map(suite_of)
 
     radius = SETTINGS["radius_miles"] * MILE_FT
-    per, A, PI, PH = {}, set(), set(), set()
+    per, A = {}, set()
+    S = {k: set() for k in ("phOff", "phOn", "dnOff", "dnOn", "otOff", "otOn", "pxOff")}
+
+    def sets(x):
+        off, on = x[~x.hs_bldg], x[x.hs_bldg]
+        return {"phOff": set(off[off.grp == "ph"].npi), "phOn": set(on[on.grp == "ph"].npi),
+                "dnOff": set(off[off.grp == "dn"].npi), "dnOn": set(on[on.grp == "dn"].npi),
+                "otOff": set(off[off.grp == "ot"].npi), "otOn": set(on[on.grp == "ot"].npi),
+                "pxOff": set(off[off.grp.isin(OWNER_USER_GROUPS)].ploc)}
+
     for _, h in hg.iterrows():
         x = g[g.geometry.distance(h.geometry) <= radius]
-        per[h["name"]] = {"phOff": int((x.phys & ~x.hs_bldg).sum()), "phOn": int((x.phys & x.hs_bldg).sum()), "cl": int(len(x))}
-        A |= set(x.npi); PI |= set(x[x.phys & ~x.hs_bldg].npi); PH |= set(x[x.phys & x.hs_bldg].npi)
-    out = {"per": per, "tot": {"phOff": len(PI), "phOn": len(PH), "cl": len(A)}, "as_of": date.today().isoformat()}
+        s = sets(x)
+        per[h["name"]] = {k: len(v) for k, v in s.items()} | {"cl": int(len(x))}
+        A |= set(x.npi)
+        for k, v in s.items():
+            S[k] |= v
+    out = {"per": per, "tot": {k: len(v) for k, v in S.items()} | {"cl": len(A)}, "as_of": date.today().isoformat()}
     (PROC / "npi_counts.json").write_text(json.dumps(out, indent=1))
-    g.drop(columns=["geometry", "par"]).to_csv(PROC / "npi_providers_near.csv", index=False)
+    g["par"] = g.par.map(lambda s: ";".join(sorted(s)) if s else "")
+    g.drop(columns=["geometry"]).to_csv(PROC / "npi_providers_near.csv", index=False)
     log(f"totals: {out['tot']}")
     log("step 3 done")
 

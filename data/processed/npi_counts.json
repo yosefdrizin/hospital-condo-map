@@ -2,84 +2,164 @@
  "per": {
   "Parkland Memorial Hospital": {
    "phOff": 154,
-   "phOn": 3414,
-   "cl": 9700
+   "phOn": 3413,
+   "dnOff": 9,
+   "dnOn": 29,
+   "otOff": 143,
+   "otOn": 512,
+   "pxOff": 103,
+   "cl": 9701
   },
   "Medical City Dallas Hospital": {
-   "phOff": 623,
+   "phOff": 624,
    "phOn": 400,
-   "cl": 2552
+   "dnOff": 14,
+   "dnOn": 11,
+   "otOff": 238,
+   "otOn": 39,
+   "pxOff": 176,
+   "cl": 2554
   },
   "Baylor University Medical Center": {
    "phOff": 117,
    "phOn": 954,
-   "cl": 3451
+   "dnOff": 42,
+   "dnOn": 209,
+   "otOff": 112,
+   "otOn": 238,
+   "pxOff": 114,
+   "cl": 3452
   },
   "Texas Health Presbyterian Hospital Dallas": {
    "phOff": 333,
    "phOn": 522,
-   "cl": 2318
+   "dnOff": 51,
+   "dnOn": 44,
+   "otOff": 469,
+   "otOn": 106,
+   "pxOff": 298,
+   "cl": 2317
   },
   "UTSW Clements University Hospital (incl. Zale Lipshy Pavilion)": {
    "phOff": 215,
-   "phOn": 3053,
-   "cl": 8374
+   "phOn": 3052,
+   "dnOff": 15,
+   "dnOn": 22,
+   "otOff": 196,
+   "otOn": 365,
+   "pxOff": 127,
+   "cl": 8376
   },
   "Methodist Dallas Medical Center": {
    "phOff": 71,
    "phOn": 314,
-   "cl": 994
+   "dnOff": 12,
+   "dnOn": 1,
+   "otOff": 118,
+   "otOn": 2,
+   "pxOff": 120,
+   "cl": 993
   },
   "Children's Medical Center Dallas": {
    "phOff": 152,
-   "phOn": 3404,
-   "cl": 9607
+   "phOn": 3403,
+   "dnOff": 5,
+   "dnOn": 27,
+   "otOff": 130,
+   "otOn": 485,
+   "pxOff": 89,
+   "cl": 9608
   },
   "Methodist Southwest Medical Center": {
    "phOff": 170,
    "phOn": 122,
-   "cl": 622
+   "dnOff": 17,
+   "dnOn": 1,
+   "otOff": 66,
+   "otOn": 8,
+   "pxOff": 116,
+   "cl": 621
   },
   "Baylor Scott & White Medical Center - Irving": {
    "phOff": 48,
    "phOn": 129,
+   "dnOff": 51,
+   "dnOn": 3,
+   "otOff": 64,
+   "otOn": 48,
+   "pxOff": 92,
    "cl": 499
   },
   "Dallas VA Medical Center": {
    "phOff": 0,
    "phOn": 168,
+   "dnOff": 1,
+   "dnOn": 20,
+   "otOff": 8,
+   "otOn": 345,
+   "pxOff": 9,
    "cl": 1158
   },
   "White Rock Medical Center": {
    "phOff": 21,
    "phOn": 27,
+   "dnOff": 13,
+   "dnOn": 4,
+   "otOff": 75,
+   "otOn": 11,
+   "pxOff": 72,
    "cl": 235
   },
   "Dallas Regional Medical Center": {
    "phOff": 43,
    "phOn": 34,
-   "cl": 307
+   "dnOff": 14,
+   "dnOn": 0,
+   "otOff": 81,
+   "otOn": 0,
+   "pxOff": 71,
+   "cl": 308
   },
   "Methodist Richardson - Campbell Rd Campus": {
    "phOff": 41,
    "phOn": 57,
-   "cl": 986
+   "dnOff": 21,
+   "dnOn": 7,
+   "otOff": 405,
+   "otOn": 17,
+   "pxOff": 161,
+   "cl": 987
   },
   "Dallas Medical Center": {
    "phOff": 20,
    "phOn": 39,
+   "dnOff": 136,
+   "dnOn": 5,
+   "otOff": 53,
+   "otOn": 16,
+   "pxOff": 84,
    "cl": 360
   },
   "Advanced Dallas Hospital and Clinics": {
    "phOff": 298,
    "phOn": 522,
-   "cl": 2224
+   "dnOff": 60,
+   "dnOn": 44,
+   "otOff": 462,
+   "otOn": 106,
+   "pxOff": 289,
+   "cl": 2223
   }
  },
  "tot": {
-  "phOff": 1737,
-  "phOn": 6180,
-  "cl": 23548
+  "phOff": 1738,
+  "phOn": 6179,
+  "dnOff": 407,
+  "dnOn": 334,
+  "otOff": 1962,
+  "otOn": 1342,
+  "pxOff": 1499,
+  "cl": 23552
  },
  "as_of": "2026-11-02"
 }

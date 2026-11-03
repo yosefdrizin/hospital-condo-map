@@ -63,18 +63,22 @@ def main():
     hs = sorted(d["hospitals"], key=lambda h: -h["b"])
     sh = ["Hospital", "System", "Licensed Beds", "Condo Buildings", "Condo Suites", "Medical Suites", "Hospital-owned Suites",
           "Independent Medical Suites", "Indep. Medical Sold in Last 3 Yrs", "Physicians in Independent Buildings",
-          "Physicians in Hospital-owned Buildings", "All Clinicians", "Notes"]
+          "Physicians in Hospital-owned Buildings", "Dentists in Independent Buildings", "Dentists in Hospital-owned Buildings",
+          "Other Outpatient in Independent Buildings", "Other Outpatient in Hospital-owned Buildings",
+          "Practice Locations in Independent Buildings", "All Clinicians", "Notes"]
+    dk = ("phOff", "phOn", "dnOff", "dnOn", "otOff", "otOn", "pxOff", "cl")
     srows = []
     for i, h in enumerate(hs, start=2):
         a = f"{P}$A$2:$A${n}"
         s = lambda col: f"=SUMIFS({P}${col}$2:${col}${n},{a},A{i})"  # noqa: E731
         srows.append([h["n"], h["sys"], h["b"], f"=COUNTIF({a},A{i})", s("J"), s("K"), s("L"), s("M"), s("N"),
-                      h.get("phOff"), h.get("phOn"), h.get("cl"), h["note"]])
-    sheet(wsS, sh, srows, [44, 30, 10, 10, 10, 10, 11, 11, 11, 12, 12, 11, 60], {"C": "#,##0", "J": "#,##0", "K": "#,##0", "L": "#,##0"})
+                      *(h.get(k) for k in dk), h["note"]])
+    sheet(wsS, sh, srows, [44, 30, 10, 10, 10, 10, 11, 11, 11, 12, 12, 12, 12, 12, 12, 12, 11, 60],
+          {c: "#,##0" for c in "CJKLMNOPQ"})
     t = d["totals"]
     wsS.append([])
     wsS.append(["All hospitals, each suite and provider counted once", None, None, len(d["condos"]), t["u"], t["mu"], t["ho"],
-                t["imu"], t["irec"], t.get("phOff"), t.get("phOn"), t.get("cl")])
+                t["imu"], t["irec"], *(t.get(k) for k in dk)])
     for c in wsS[wsS.max_row]:
         c.font = B
     wsS.append([])
@@ -97,6 +101,8 @@ def main():
         ("Medical suites", "DCAD building class MEDICAL OFFICE BUILDING or URGENT CARE CLINIC. Building type, not current tenant."),
         ("Ownership", "Owner-name screen: hospital/health system (Baylor, UT System, Encompass Health, Richardson Medical Center = former Methodist Richardson name), medical practice name, or investor/other. Doctors holding suites through LLCs appear as investor/other."),
         ("Physicians", "Individual NPI records (MD/DO taxonomy 20*) with a practice address within the radius. Each address is matched to its DCAD parcel; hospital-owned buildings = hospital campuses or parcels titled to a hospital, health system, UT System or VA. NPI addresses are self-reported."),
+        ("Dentists / other outpatient", "Same method. Dentists = taxonomy 1223*. Other outpatient = chiropractic, PT, OT, optometry, podiatry, psychology, counseling, clinical social work, marriage and family therapy, audiology, speech. NPs, PAs and other clinicians appear only in All Clinicians."),
+        ("Practice locations", "Distinct building + suite among physicians, dentists and other outpatient in independent buildings: roughly the number of practices that could each buy a suite. Approximate; many NPI addresses omit the suite."),
         ("Structure", "Owner-user suite condo = fragmented ownership; Single-owner / controlled = one owner holds 75%+ of suites; Mixed-use master = commercial units inside an apartment/garage master regime."),
     ]
     wm.append(["Item", "Detail"])
