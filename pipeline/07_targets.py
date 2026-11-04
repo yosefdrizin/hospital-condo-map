@@ -8,12 +8,14 @@ practicing in that building per the NPI Registry (from step 3).
 Writes outputs/private/ (git-ignored: the repo is public). Run after steps 3 and 5.
 """
 import json
+import re
 
+import geopandas as gpd
 import pandas as pd
 from importlib import import_module
 
-from common import (DOCS, HEALTH_SYSTEM_PARCEL_RE, MILE_FT, OUT, PROC, RAW, SETTINGS, find_one, log, owner_class,
-                    use_category)
+from common import (CRS_FT, DOCS, HEALTH_SYSTEM_PARCEL_RE, MILE_FT, OUT, PROC, RAW, SETTINGS, find_one, log, norm_street,
+                    owner_class, use_category)
 
 condos_mod = import_module("02_condos")
 site = import_module("05_build_site")
@@ -25,6 +27,38 @@ KEEP_CODES = ("M", "O", "R")          # medical office, office (incl. flex), ret
 # main building classes that are rarely a suite-condo conversion
 SKIP_CLASS_RE = r"SERVICE STATION|FAST FOOD|CONVENIENCE|AUTOMOTIVE|CAR WASH|SUPERMARKET|THEATER"
 OWNER_TYPE = {"P": "Medical practice name", "I": "Investor / other"}
+
+
+def load_costar(p, addr_par):
+    """CoStar property exports from data/raw/costar, one row per property, matched to a DCAD parcel.
+
+    Address match first; otherwise the parcel under the CoStar pin, or the nearest within 100 ft.
+    Licensed data: it only ever goes to outputs/private, never docs/ or git.
+    """
+    fs = sorted((RAW / "costar").glob("*.xlsx"))
+    if not fs:
+        return None, ""
+    c = pd.concat([pd.read_excel(f, dtype=str) for f in fs], ignore_index=True).drop_duplicates("PropertyID")
+    for k in ("RBA", "Latitude", "Longitude", "Number of Parking Spaces", "Parking Ratio", "Percent Leased",
+              "Total Available Space (SF)", "For Sale Price Per SF", "Last Sale Price"):
+        c[k] = pd.to_numeric(c[k].str.replace(r"[$,]", "", regex=True), errors="coerce")
+    c["par"] = c["Property Address"].map(norm_street).map(addr_par)
+    c["how"] = c.par.notna().map({True: "Address", False: ""})
+    pts = gpd.GeoDataFrame(c[["PropertyID"]], geometry=gpd.points_from_xy(c.Longitude, c.Latitude), crs=4326).to_crs(CRS_FT)
+    miss = c.par.isna()
+    hit = gpd.sjoin(pts[miss], p[["Acct", "geometry"]], predicate="within", how="inner")
+    hit = hit[~hit.index.duplicated()]
+    c.loc[hit.index, "par"] = hit.Acct
+    c.loc[hit.index, "how"] = "CoStar pin"
+    miss = c.par.isna()
+    nn = gpd.sjoin_nearest(pts[miss], p[["Acct", "geometry"]], max_distance=100, how="inner")
+    nn = nn[~nn.index.duplicated()]
+    c.loc[nn.index, "par"] = nn.Acct
+    c.loc[nn.index, "how"] = "Pin within 100 ft"
+    m = re.search(r"(\d{2})(\d{2})(\d{2})$", pd.ExcelFile(fs[0]).sheet_names[0])
+    asof = f"{m.group(1)}/{m.group(2)}/20{m.group(3)}" if m else ""
+    log(f"CoStar: {len(c):,} properties, {c.par.notna().sum():,} matched to a parcel in the rings ({c.how.value_counts().to_dict()})")
+    return c, asof
 
 
 def main():
@@ -53,6 +87,9 @@ def main():
     # drop condo regimes and anything already split into condo accounts
     legal = ai.LEGAL1.fillna("") + " " + ai.LEGAL2.fillna("") + " " + ai.LEGAL3.fillna("") + " " + ai.LEGAL4.fillna("")
     condo_par = set(ai[ai.GIS_PARCEL_ID.str.startswith("CONDO", na=False) | (ai.DIVISION_CD.eq("COM") & legal.str.contains(r"CONDO|CE ?%", regex=True))].GIS_PARCEL_ID)
+    akey = (ai.STREET_NUM.fillna("").str.strip() + " " + ai.FULL_STREET_NAME.fillna("")).map(norm_street)
+    pars = ai.assign(akey=akey).groupby("akey").GIS_PARCEL_ID.agg(lambda x: set(x))
+    addr_par = {k: next(iter(v)) for k, v in pars.items() if len(v) == 1}     # skip addresses spanning parcels
     ai = ai[~ai.GIS_PARCEL_ID.isin(condo_par)]
 
     ai["code"] = [site.parcel_code(c, s, d) for c, s, d in zip(ai.BLDG_CLASS_DESC, ai.SPTD_CODE, ai.DIVISION_CD)]
@@ -73,6 +110,7 @@ def main():
     b["hs"] = b.owner.fillna("").str.upper().str.contains(HEALTH_SYSTEM_PARCEL_RE, regex=True) | b.code.eq("H")
     log(f"non-condo parcels within the radius with a DCAD account: {len(b):,}")
     poor_fit = b.cls.fillna("").str.contains(SKIP_CLASS_RE, regex=True)
+    b_all = b.assign(poor=poor_fit).set_index("GIS_PARCEL_ID")
     b = b[b.code.isin(KEEP_CODES) & ~b.hs & b.owners.eq(1) & (b.SF >= MIN_SF) & ~poor_fit].copy()
     log(f"candidate buildings (office / medical / retail, one owner, not hospital, {MIN_SF:,}+ SF): {len(b):,}")
 
@@ -98,8 +136,45 @@ def main():
     for c in ("ph", "dn", "ot", "cl", "px"):
         b[c] = b[c].fillna(0).astype(int)
 
+    # CoStar facts per candidate parcel; a parcel can hold several CoStar properties, the largest speaks for it
+    cs, cs_asof = load_costar(p, addr_par)
+    cand = set(b.GIS_PARCEL_ID)
+    cmap = {}
+    if cs is not None:
+        cs = cs.sort_values("RBA", ascending=False)
+        cmap = {k: g for k, g in cs[cs.par.isin(cand)].groupby("par")}
+
+    def why_not(r):
+        if not isinstance(r.par, str):
+            return "No DCAD parcel match inside the rings"
+        if r.par in cand:
+            return "Candidate"
+        if r.par in condo_par:
+            return "Already a DCAD condo"
+        if r.par not in b_all.index:
+            return "No DCAD account on parcel"
+        x = b_all.loc[r.par]
+        return ("Hospital or health system" if x.hs else "More than one DCAD owner" if x.owners > 1
+                else f"Under {MIN_SF:,} SF in DCAD" if not x.SF >= MIN_SF else "DCAD class left out")
+
     def s(v):
         return v.strip() if isinstance(v, str) else ""
+
+    def n(v):
+        return None if pd.isna(v) else (int(v) if float(v).is_integer() else float(v))
+
+    def costar_cols(par, dcad_sf):
+        g = cmap.get(par)
+        if g is None:
+            return [""] * 20
+        t = g.iloc[0]
+        ratio = t.RBA / dcad_sf if dcad_sf and pd.notna(t.RBA) else None
+        sale = pd.to_datetime(t["Last Sale Date"], errors="coerce")
+        return [t.PropertyID, s(t["Property Name"]), s(t["Property Type"]), s(t["Secondary Type"]), s(t["Building Class"]),
+                n(t.RBA), n(t["Number of Parking Spaces"]), n(t["Parking Ratio"]), s(t.Condo), n(t["Percent Leased"]),
+                n(t["Total Available Space (SF)"]), s(t["Rent/SF/Yr"]), s(t["For Sale Status"]), n(t["For Sale Price Per SF"]),
+                sale.strftime("%Y-%m-%d") if pd.notna(sale) else "", n(t["Last Sale Price"]), s(t["True Owner Name"]), len(g), s(t.how),
+                "OK" if ratio and 0.75 <= ratio <= 1.25 else "Size differs"]
 
     def mail(r):
         lines = [x for x in (r.ml1, r.ml2, r.ml3) if isinstance(x, str) and x.strip()]
@@ -116,7 +191,7 @@ def main():
                      int(r.val) if pd.notna(r.val) else None, round(r.val / r.SF) if pd.notna(r.val) and r.SF else None,
                      r.deed.strftime("%Y-%m-%d") if pd.notna(r.deed) else "", s(r.owner), s(r.owner2),
                      OWNER_TYPE.get(owner_class(s(r.owner)), "Investor / other"), mail(r), s(r.mst),
-                     r.ph, r.dn, r.ot, r.cl, r.px, r.accts, r.acct, r.GIS_PARCEL_ID])
+                     r.ph, r.dn, r.ot, r.cl, r.px, r.accts, r.acct, r.GIS_PARCEL_ID, *costar_cols(r.GIS_PARCEL_ID, r.SF)])
 
     # ring summary from the site data (supply) + this step (candidates)
     d = json.loads((DOCS / "data.json").read_text())
@@ -142,9 +217,26 @@ def main():
               "Use", "Bldg SF", "Net Leasable SF", "Yr Built", "Remodel Yr", "Stories", "DCAD Quality", "DCAD Condition",
               "DCAD Value", "Value / SF", "Latest Deed", "Owner", "Owner 2", "Owner Type", "Owner Mailing Address", "Owner State",
               "Physicians in Bldg", "Dentists in Bldg", "Other Outpatient in Bldg", "All Clinicians in Bldg",
-              "Practice Locations in Bldg", "DCAD Accounts", "DCAD Account", "GIS Parcel ID"],
-             rows, [38, 9, 9, 28, 12, 26, 24, 16, 10, 10, 8, 8, 7, 10, 10, 13, 9, 11, 34, 20, 18, 44, 7, 9, 9, 9, 9, 9, 8, 20, 20],
-             {"B": "0.00", "I": "#,##0", "J": "#,##0", "P": "$#,##0", "Q": "$#,##0"})
+              "Practice Locations in Bldg", "DCAD Accounts", "DCAD Account", "GIS Parcel ID",
+              "CoStar ID", "CoStar Name", "CoStar Type", "CoStar Secondary Type", "CoStar Class", "CoStar RBA", "CoStar Parking Spaces",
+              "CoStar Parking Ratio", "CoStar Condo", "CoStar % Leased", "CoStar Available SF", "CoStar Rent/SF/Yr", "CoStar For Sale",
+              "CoStar For Sale $/SF", "CoStar Last Sale Date", "CoStar Last Sale Price", "CoStar True Owner", "CoStar Properties on Parcel",
+              "CoStar Match", "CoStar vs DCAD Size"],
+             rows, [38, 9, 9, 28, 12, 26, 24, 16, 10, 10, 8, 8, 7, 10, 10, 13, 9, 11, 34, 20, 18, 44, 7, 9, 9, 9, 9, 9, 8, 20, 20,
+                    11, 26, 20, 16, 7, 10, 9, 8, 7, 8, 10, 14, 7, 9, 11, 13, 30, 9, 14, 11],
+             {"B": "0.00", "I": "#,##0", "J": "#,##0", "P": "$#,##0", "Q": "$#,##0", "AK": "#,##0", "AP": "#,##0", "AU": "$#,##0"})
+    if cs is not None:
+        cs["status"] = [why_not(r) for r in cs.itertuples()]
+        log(f"CoStar status: {cs.status.value_counts().to_dict()}")
+        cs["dcls"] = cs.par.map(b_all.cls)
+        review = [[r.status, r.Condo, s(r.address), s(r.City), s(r.name_), s(r.ptype), s(r.stype), n(r.RBA), s(r.dcls), s(r.owner_), r.PropertyID, s(r.how)]
+                  for r in cs.rename(columns={"Property Address": "address", "Property Name": "name_", "Property Type": "ptype",
+                                              "Secondary Type": "stype", "True Owner Name": "owner_"}).sort_values(["status", "address"]).itertuples()
+                  if r.status != "Candidate" or r.Condo == "Yes"]
+        xl.sheet(wb.create_sheet("CoStar Review"),
+                 ["Status vs DCAD", "CoStar Condo", "Address", "City", "CoStar Name", "CoStar Type", "CoStar Secondary Type", "CoStar RBA",
+                  "DCAD Bldg Class", "CoStar True Owner", "CoStar ID", "CoStar Match"],
+                 review, [32, 8, 30, 12, 28, 24, 18, 10, 24, 30, 11, 14], {"H": "#,##0"})
     wm = wb.create_sheet("Method & Notes")
     notes = [
         ("Purpose", "Internal. Existing buildings near each hospital that could be bought and converted to medical condo suites, "
@@ -165,7 +257,13 @@ def main():
                          "Owner-user providers = physicians + dentists + other outpatient. Rings overlap, so rows do not add to a county total."),
         ("Sources", f"DCAD {SETTINGS['dcad_year']} roll and parcel GIS ({d['asof']}); CMS NPI Registry pulled {d.get('npiAsOf', '')}; "
                     f"Census geocoder. Built {d['built']}."),
-        ("CoStar", "Not yet joined. A CoStar export (address, RBA, vacancy, asking rent, for-sale status, last sale price) can be matched on address."),
+        ("CoStar", (f"CoStar property exports dated {cs_asof}, {len(cs):,} properties of office, retail, flex and health care, about 5,000 to 100,000 SF "
+                    "in CoStar's RBA, searched by radius around the hospitals. Matched to DCAD parcels by address, then by CoStar pin. "
+                    "A blank CoStar column means no CoStar property matched, usually because the building is outside that size range. "
+                    "Where one parcel holds several CoStar properties, the largest is shown. 'Size differs' means CoStar RBA is more than 25% "
+                    "from DCAD SF, so the CoStar row may describe only part of the property. The CoStar Review sheet lists every CoStar "
+                    "property that is not a candidate and why, plus candidates CoStar flags as condos. CoStar data is licensed: internal use only."
+                    ) if cs is not None else "No CoStar export in data/raw/costar."),
     ]
     wm.append(["Item", "Detail"])
     for a_, b_ in notes:

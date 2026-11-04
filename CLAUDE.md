@@ -87,6 +87,8 @@ Some source labels in the page footer are hard-coded (DCAD roll date, TIGER year
   the first time; it is cached as data/cache/parcels.pkl.
 - GitHub limits: 100 MB per file. `data/raw` and `data/cache` are git-ignored; never commit them.
 - The site is public. Do not add owner mailing addresses, phone numbers or individual provider records to docs/.
+- CoStar exports go in `data/raw/costar/*.xlsx` (git-ignored). Licensed data: step 7 joins it into outputs/private only, never docs/ or git.
+  Parcel match is by address, then CoStar pin. The 11/3/2026 export covers about 5,000 to 100,000 SF, so smaller and larger candidates have blank CoStar columns.
 
 ## Ideas backlog (only when the user asks)
 - CoStar export: current medical condo listings and MOB availability within each ring.
