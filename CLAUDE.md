@@ -89,6 +89,10 @@ Some source labels in the page footer are hard-coded (DCAD roll date, TIGER year
 - The site is public. Do not add owner mailing addresses, phone numbers or individual provider records to docs/.
 - CoStar exports go in `data/raw/costar/*.xlsx` (git-ignored). Licensed data: step 7 joins it into outputs/private only, never docs/ or git.
   Parcel match is by address, then CoStar pin. The 11/3/2026 export covers about 5,000 to 100,000 SF, so smaller and larger candidates have blank CoStar columns.
+- CoStar sale comps go in `data/raw/costar_comps/` (git-ignored), never in `data/raw/costar/`, which step 7 reads as property exports. Files starting "condo" are suite sales;
+  the rest are whole buildings. Texas doesn't disclose sale prices, so few rows have one: never present a comp median without its count.
+- SBA FOIA loan files go in `data/raw/sba/` (git-ignored; 7(a) files are about 440 MB, from data.sba.gov/dataset/7a-504-foia). Step 7 caches the filtered rows in
+  `data/cache/sba_health.csv`; delete that after a refresh. SBA suite prices are loan-based estimates, not closing prices. Borrower lists stay in outputs/private.
 
 ## Ideas backlog (only when the user asks)
 - CoStar export: current medical condo listings and MOB availability within each ring.

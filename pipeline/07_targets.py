@@ -14,8 +14,8 @@ import geopandas as gpd
 import pandas as pd
 from importlib import import_module
 
-from common import (CRS_FT, DOCS, HEALTH_SYSTEM_PARCEL_RE, MILE_FT, OUT, PROC, RAW, SETTINGS, find_one, log, norm_street,
-                    owner_class, use_category)
+from common import (CACHE, CRS_FT, DOCS, HEALTH_SYSTEM_PARCEL_RE, MILE_FT, OUT, PROC, RAW, SETTINGS, find_one, log, norm_street,
+                    owner_class, strip_suite, suite_of, use_category)
 
 condos_mod = import_module("02_condos")
 site = import_module("05_build_site")
@@ -26,6 +26,16 @@ MIN_SF = 2500
 KEEP_CODES = ("M", "O", "R")          # medical office, office (incl. flex), retail; see parcel_code in step 5
 # main building classes that are rarely a suite-condo conversion
 SKIP_CLASS_RE = r"SERVICE STATION|FAST FOOD|CONVENIENCE|AUTOMOTIVE|CAR WASH|SUPERMARKET|THEATER"
+# sale conditions whose price does not reflect a plain market sale of that property
+COMP_SKIP_RE = r"Bulk/Portfolio|Ground Lease|Partial Interest|Business Value|Entity Buy|REO|Auction|Lease Option|Build to Suit|Double Escrow"
+COMP_HEAD = ["Comp ID", "CoStar ID", "Address", "City", "County", "Segment", "Property Type", "Secondary Type", "Class", "Yr Built", "SF",
+             "Sale Date", "Sale Status", "Sale Type", "Sale Price", "Price / SF", "Asking Price", "Asking / SF", "Cap Rate", "Sale Condition",
+             "Price Treatment", "Nearest Hospital", "Distance (mi)", "In 1-mile Ring", "Buyer (True)", "Seller (True)"]
+COMP_W = [10, 10, 34, 13, 9, 15, 22, 16, 6, 7, 8, 11, 9, 12, 12, 8, 12, 8, 7, 24, 26, 34, 8, 7, 28, 28]
+COMP_FMT = {"K": "#,##0", "O": "$#,##0", "P": "$#,##0", "Q": "$#,##0", "R": "$#,##0", "W": "0.00"}
+SBA_NAICS = ("6211", "6212", "6213", "6214")     # offices of physicians, dentists, other practitioners; outpatient centers
+SBA_COUNTIES = ("DALLAS", "COLLIN", "DENTON", "TARRANT")
+SBA_MIN_TERM = 240                                # a long 7(a) term usually means real estate; the data has no purpose field
 OWNER_TYPE = {"P": "Medical practice name", "I": "Investor / other"}
 
 
@@ -59,6 +69,129 @@ def load_costar(p, addr_par):
     asof = f"{m.group(1)}/{m.group(2)}/20{m.group(3)}" if m else ""
     log(f"CoStar: {len(c):,} properties, {c.par.notna().sum():,} matched to a parcel in the rings ({c.how.value_counts().to_dict()})")
     return c, asof
+
+
+def comp_segment(r):
+    if r["Secondary Type"] == "Medical" or r.ptype == "Health Care":
+        return "Medical office"
+    return {"Office": "Other office", "Retail": "Retail", "Flex": "Flex / industrial", "Industrial": "Flex / industrial"}.get(r.ptype, "Other")
+
+
+def load_comps(hg):
+    """CoStar sale comps from data/raw/costar_comps: files starting 'condo' are suites, the rest whole buildings.
+
+    Licensed data: outputs/private only. Each row notes whether its price counts toward the summary medians.
+    """
+    out = []
+    for f in sorted((RAW / "costar_comps").glob("*.xlsx")):
+        d = pd.read_excel(f, dtype=str)
+        for k in ("Price Per SF", "Building SF", "Sale Price", "Asking Price", "Actual Cap Rate", "Year Built"):
+            d[k] = pd.to_numeric(d[k].str.replace(r"[$,%]", "", regex=True), errors="coerce")
+        d["kind"] = "Condo" if f.name.lower().startswith("condo") else "Building"
+        out.append(d)
+    if not out:
+        return None
+    c = pd.concat(out, ignore_index=True).drop_duplicates(["kind", "Comp ID", "PropertyID", "Building SF"])
+    c = c[(c.kind == "Condo") | ~c["Property Address"].str.contains("(Condo)", regex=False)].copy()
+    c["date"] = pd.to_datetime(c["Sale Date"], errors="coerce")
+    c["ptype"] = c["Property Type"].str.replace(r" \(.*", "", regex=True)
+    c["seg"] = c.apply(comp_segment, axis=1)
+    c["ask_sf"] = c["Asking Price"] / c["Building SF"]
+    multi = c.groupby(["kind", "Comp ID"]).PropertyID.transform("nunique") > 1
+    cond = c["Sale Condition"].fillna("")
+    c["treat"] = "Counted"
+    c.loc[c["Sale Price"].isna(), "treat"] = "No disclosed price"
+    c.loc[cond.str.contains(COMP_SKIP_RE, regex=True) | multi, "treat"] = "Left out: portfolio or non-market condition"
+    c.loc[c["Sale Status"] != "Sold", "treat"] = "Left out: not closed"
+    pts = gpd.GeoSeries(gpd.points_from_xy(pd.to_numeric(c.Longitude), pd.to_numeric(c.Latitude)), crs=4326, index=c.index).to_crs(CRS_FT)
+    dist = pd.concat([pts.distance(h.geometry).rename(h["name"]) / MILE_FT for _, h in hg.iterrows()], axis=1)
+    c["dist"], c["hosp"] = dist.min(axis=1).round(2), dist.dropna().idxmin(axis=1)      # a few comps have no pin
+    log(f"CoStar comps: {c.kind.value_counts().to_dict()}, {c.treat.value_counts().to_dict()}")
+    return c
+
+
+def comp_rows(c):
+    v = lambda x: None if pd.isna(x) else x  # noqa: E731
+    return [[r["Comp ID"], r.PropertyID, r["Property Address"], r["Property City"], r["Property County"], r.seg, r["Property Type"],
+             v(r["Secondary Type"]), v(r["Building Class"]), v(r["Year Built"]), v(r["Building SF"]),
+             r.date.strftime("%Y-%m-%d") if pd.notna(r.date) else "", r["Sale Status"], v(r["Sale Type"]), v(r["Sale Price"]),
+             v(r["Price Per SF"]), v(r["Asking Price"]), None if pd.isna(r.ask_sf) else round(r.ask_sf), v(r["Actual Cap Rate"]),
+             v(r["Sale Condition"]), r.treat, v(r.hosp), v(r.dist), "Yes" if r.dist <= SETTINGS["radius_miles"] else "No",
+             v(r["Buyer (True) Company"]), v(r["Seller (True) Company"])] for _, r in c.sort_values("date", ascending=False, na_position="last").iterrows()]
+
+
+def comp_summary(c):
+    rows = []
+    groups = (("Dallas County", ["Dallas"]), ("Collin + Denton", ["Collin", "Denton"]))
+    for kind in ("Condo", "Building"):
+        k = c[c.kind == kind]
+        for label, counties in groups:
+            for seg in ("Medical office", "Other office", "Retail", "Flex / industrial"):
+                x = k[k["Property County"].isin(counties) & (k.seg == seg) & (k["Sale Status"] == "Sold")]
+                if x.empty:
+                    continue
+                p = x[x.treat == "Counted"]["Price Per SF"]
+                a = x.ask_sf.dropna()
+                rows.append([kind, label, seg, len(x), int((x["Sale Type"] == "Owner User").sum()), int((x.dist <= SETTINGS["radius_miles"]).sum()),
+                             len(p), round(p.median()) if len(p) else None, round(p.min()) if len(p) else None, round(p.max()) if len(p) else None,
+                             len(a), round(a.median()) if len(a) else None, x.date.min().strftime("%Y-%m-%d"), x.date.max().strftime("%Y-%m-%d")])
+    return rows
+
+
+def load_sba():
+    """Funded healthcare SBA loans that look like real estate: all 504s, plus 7(a)s on terms of SBA_MIN_TERM+ months.
+
+    Reads data/raw/sba/FOIA_*.csv once and caches the filtered rows in data/cache/sba_health.csv. Delete it after a refresh.
+    """
+    cache = CACHE / "sba_health.csv"
+    if cache.exists():
+        return pd.read_csv(cache, dtype=str)
+    out = []
+    for f in sorted((RAW / "sba").glob("FOIA_*.csv")):
+        for ch in pd.read_csv(f, dtype=str, encoding="latin-1", chunksize=200000, low_memory=False):
+            out.append(ch[(ch.ProjectState == "TX") & ch.NaicsCode.fillna("").str[:4].isin(SBA_NAICS)
+                          & ch.ProjectCounty.fillna("").str.upper().isin(SBA_COUNTIES) & ~ch.LoanStatus.isin(["CANCLD", "NOT FUNDED"])])
+    if not out:
+        return None
+    d = pd.concat(out, ignore_index=True)
+    d.to_csv(cache, index=False)
+    return d
+
+
+def sba_tables(d):
+    """(loan rows, suite purchase rows). Suite purchase = Dallas County loan at a DCAD condo address, with that suite's deed within 6 months of the loan."""
+    d = d.copy()
+    d["Program"] = d.Program.str.strip()
+    d["amt"] = pd.to_numeric(d.GrossApproval, errors="coerce")
+    d["bank"] = pd.to_numeric(d["ThirdPartyDollars"], errors="coerce")
+    d["term"] = pd.to_numeric(d.TermInMonths, errors="coerce")
+    d["date"] = pd.to_datetime(d.ApprovalDate, errors="coerce")
+    d = d[(d.Program == "504") | (d.term >= SBA_MIN_TERM)].copy().reset_index(drop=True)
+    d["est"] = ((d.amt + d.bank.fillna(0)) / 0.9).round()
+    d["county"] = d.ProjectCounty.str.title()
+    d["lender"] = d.ThirdPartyLender_Name.where(d.Program == "504", d.BankName)
+    v = lambda x: None if pd.isna(x) else x  # noqa: E731
+    loans = [[r.Program, r.county, r.BorrName, r.BorrStreet, r.BorrCity, r.BorrZip, r.NaicsDescription.strip(), r.date.strftime("%Y-%m-%d"), v(r.term), v(r.amt),
+              v(r.bank), v(r.est), r.LoanStatus, v(r.lender)] for r in d.sort_values("date", ascending=False).itertuples()]
+    u = pd.read_csv(PROC / "condo_units.csv", dtype=str)
+    u = u[u.counted == "True"].copy()
+    ring = set(pd.read_csv(PROC / "hospital_regimes.csv", dtype=str).regime)
+    u["k"] = u.addr.fillna("").map(norm_street)
+    u["sf"] = pd.to_numeric(u.SF, errors="coerce")
+    u["deed"] = pd.to_datetime(u.DEED_TXFR_DATE, errors="coerce")
+    u["uid"] = u.UNIT_ID.fillna("").str.strip().str.upper().str.lstrip("0")
+    x = d[d.county == "Dallas"].copy()
+    x["loan"] = x.index
+    x["k"] = x.BorrStreet.fillna("").map(strip_suite).map(norm_street)
+    x["s"] = x.BorrStreet.map(suite_of).str.upper().str.lstrip("0")
+    m = x.merge(u[["k", "uid", "sf", "deed", "OWNER_NAME1", "use", "regime", "PROPERTY_CITY"]], on="k")
+    m["gap"] = (m.deed - m.date).dt.days.abs()
+    m = m[(m.gap <= 180) & (m.sf > 0) & ((m.s == "") | (m.s == m.uid))].sort_values(["loan", "gap"]).drop_duplicates("loan")
+    buys = [[r.Program, r.BorrName, r.BorrStreet, r.PROPERTY_CITY, r.NaicsDescription.strip(), r.date.strftime("%Y-%m-%d"), r.deed.strftime("%Y-%m-%d"), int(r.gap),
+             v(r.amt), v(r.bank), r.est, int(r.sf), round(r.est / r.sf), r.uid, "Address + suite" if r.s else "Address + deed date", r.OWNER_NAME1, r.use,
+             "Yes" if r.regime in ring else "No"] for r in m.sort_values("date", ascending=False).itertuples()]
+    log(f"SBA: {len(loans)} real-estate style healthcare loans, {len(buys)} tied to a Dallas County condo suite")
+    return loans, buys
 
 
 def main():
@@ -237,6 +370,26 @@ def main():
                  ["Status vs DCAD", "CoStar Condo", "Address", "City", "CoStar Name", "CoStar Type", "CoStar Secondary Type", "CoStar RBA",
                   "DCAD Bldg Class", "CoStar True Owner", "CoStar ID", "CoStar Match"],
                  review, [32, 8, 30, 12, 28, 24, 18, 10, 24, 30, 11, 14], {"H": "#,##0"})
+    comps = load_comps(hg)
+    if comps is not None:
+        xl.sheet(wb.create_sheet("Comp Summary"),
+                 ["Sale Kind", "Area", "Segment", "Closed Sale Records", "Owner-user Sales", "Inside a 1-mile Ring", "Prices Counted",
+                  "Median $/SF", "Low $/SF", "High $/SF", "Asking Prices", "Median Asking $/SF", "First Sale", "Last Sale"],
+                 comp_summary(comps), [10, 16, 16, 9, 9, 9, 8, 8, 8, 8, 8, 9, 11, 11], {c_: "$#,##0" for c_ in "HIJL"})
+        xl.sheet(wb.create_sheet("Condo Comps"), COMP_HEAD, comp_rows(comps[comps.kind == "Condo"]), COMP_W, COMP_FMT)
+        xl.sheet(wb.create_sheet("Building Comps"), COMP_HEAD, comp_rows(comps[comps.kind == "Building"]), COMP_W, COMP_FMT)
+    sba = load_sba()
+    if sba is not None:
+        loans, buys = sba_tables(sba)
+        xl.sheet(wb.create_sheet("SBA Suite Purchases"),
+                 ["Program", "Borrower", "Borrower Address", "City", "Industry", "Loan Date", "DCAD Deed Date", "Days Apart", "SBA or 7(a) Loan", "504 Bank Loan",
+                  "Est. Price", "Suite SF", "Est. $/SF", "DCAD Unit", "Match", "DCAD Owner", "DCAD Use", "In 1-mile Ring"],
+                 buys, [8, 32, 34, 18, 34, 11, 11, 7, 12, 12, 12, 8, 8, 8, 18, 30, 15, 7],
+                 {"I": "$#,##0", "J": "$#,##0", "K": "$#,##0", "L": "#,##0", "M": "$#,##0"})
+        xl.sheet(wb.create_sheet("SBA Loans"),
+                 ["Program", "County", "Borrower", "Borrower Address", "City", "ZIP", "Industry", "Loan Date", "Term (mo)", "SBA or 7(a) Loan", "504 Bank Loan",
+                  "Est. Project Cost", "Status", "Lender"],
+                 loans, [8, 9, 34, 34, 15, 7, 36, 11, 7, 12, 12, 12, 8, 34], {"J": "$#,##0", "K": "$#,##0", "L": "$#,##0"})
     wm = wb.create_sheet("Method & Notes")
     notes = [
         ("Purpose", "Internal. Existing buildings near each hospital that could be bought and converted to medical condo suites, "
@@ -264,6 +417,19 @@ def main():
                     "from DCAD SF, so the CoStar row may describe only part of the property. The CoStar Review sheet lists every CoStar "
                     "property that is not a candidate and why, plus candidates CoStar flags as condos. CoStar data is licensed: internal use only."
                     ) if cs is not None else "No CoStar export in data/raw/costar."),
+        ("Sale comps", ("CoStar sale comps, exported 11/3/2026. Condo Comps cover about 5 years; Building Comps cover only the last 12 months, so the two "
+                        "are different time windows. Texas does not disclose sale prices, so most rows have no price. Medians use closed sales with a "
+                        "disclosed price, leaving out portfolio and non-market conditions (see Price Treatment). Asking prices are not sale prices. "
+                        "Very few prices are counted: read medians as a rough indication, not a market price."
+                        ) if comps is not None else "No sale comps in data/raw/costar_comps."),
+        ("SBA loans", ("SBA 7(a) and 504 FOIA data as of 9/30/2026 (data.sba.gov), from FY2010. Funded loans to physicians, dentists, other "
+                       f"practitioners and outpatient centers with projects in Dallas, Collin, Denton or Tarrant County. All 504s; 7(a)s only on terms of {SBA_MIN_TERM}+ months, "
+                       "because a long term usually means real estate (the data has no loan purpose). Addresses are the borrower's, not always the property. "
+                       "Cash and conventional purchases do not appear."
+                       ) if sba is not None else "No SBA files in data/raw/sba."),
+        ("SBA suite purchases", "Dallas County loans at a DCAD condo address where a suite's deed transferred within 6 months of the loan: likely purchases, not confirmed. "
+                                "Est. Price = (loan + 504 bank loan) / 0.9, assuming 10% down. It is an estimate, not a closing price, and can run high because a loan can also fund "
+                                "buildout or equipment. 'Address + deed date' means no suite in the loan address, so the suite is the one with the closest deed date."),
     ]
     wm.append(["Item", "Detail"])
     for a_, b_ in notes:
