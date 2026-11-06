@@ -7,21 +7,29 @@ practicing in that building per the NPI Registry (from step 3).
 
 Writes outputs/private/ (git-ignored: the repo is public). Run after steps 3 and 5.
 """
+import gzip
 import json
+import os
 import re
+import secrets
 
 import geopandas as gpd
 import pandas as pd
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from importlib import import_module
 
 from common import (CACHE, CRS_FT, DOCS, HEALTH_SYSTEM_PARCEL_RE, MILE_FT, OUT, PROC, RAW, SETTINGS, find_one, log, norm_street,
-                    owner_class, strip_suite, suite_of, use_category)
+                    owner_class, poly_rings, polyline, strip_suite, suite_of, use_category)
 
 condos_mod = import_module("02_condos")
 site = import_module("05_build_site")
 xl = import_module("06_build_excel")
 
 PRIVATE = OUT / "private"
+MAP_URL = "https://yosefdrizin.github.io/hospital-condo-map/"
+KDF_ROUNDS = 310000                   # must match docs/deal_layer.js
 MIN_SF = 2500
 KEEP_CODES = ("M", "O", "R")          # medical office, office (incl. flex), retail; see parcel_code in step 5
 # main building classes that are rarely a suite-condo conversion
@@ -158,8 +166,23 @@ def load_sba():
     return d
 
 
+def sba_geocode(d):
+    """Map pins for borrower addresses via the Census batch geocoder, cached in data/cache/sba_geo.csv."""
+    cache = CACHE / "sba_geo.csv"
+    geo = pd.read_csv(cache, dtype={"gk": str}) if cache.exists() else pd.DataFrame(columns=["gk", "lat", "lon"])
+    d["street"] = d.BorrStreet.fillna("").map(strip_suite)
+    d["gk"] = d.street + "|" + d.BorrCity.fillna("").str.upper() + "|" + d.BorrZip.fillna("").str[:5]
+    todo = d[~d.gk.isin(set(geo.gk))].drop_duplicates("gk").reset_index(drop=True)
+    if len(todo):
+        res = import_module("03_npi").census_batch([(str(i), r.street, r.BorrCity, "TX", r.BorrZip[:5]) for i, r in todo.iterrows()])
+        new = [(r.gk, *res.get(str(i), (None, None))) for i, r in todo.iterrows()]
+        geo = pd.concat([geo, pd.DataFrame(new, columns=["gk", "lat", "lon"])], ignore_index=True)
+        geo.to_csv(cache, index=False)
+    return d.merge(geo, on="gk", how="left")
+
+
 def sba_tables(d):
-    """(loan rows, suite purchase rows). Suite purchase = Dallas County loan at a DCAD condo address, with that suite's deed within 6 months of the loan."""
+    """(loan rows, suite purchase rows, their map points). Suite purchase = Dallas County loan at a DCAD condo address, with that suite's deed within 6 months of the loan."""
     d = d.copy()
     d["Program"] = d.Program.str.strip()
     d["amt"] = pd.to_numeric(d.GrossApproval, errors="coerce")
@@ -170,9 +193,12 @@ def sba_tables(d):
     d["est"] = ((d.amt + d.bank.fillna(0)) / 0.9).round()
     d["county"] = d.ProjectCounty.str.title()
     d["lender"] = d.ThirdPartyLender_Name.where(d.Program == "504", d.BankName)
+    d = sba_geocode(d)
     v = lambda x: None if pd.isna(x) else x  # noqa: E731
+    by_date = d.sort_values("date", ascending=False)
     loans = [[r.Program, r.county, r.BorrName, r.BorrStreet, r.BorrCity, r.BorrZip, r.NaicsDescription.strip(), r.date.strftime("%Y-%m-%d"), v(r.term), v(r.amt),
-              v(r.bank), v(r.est), r.LoanStatus, v(r.lender)] for r in d.sort_values("date", ascending=False).itertuples()]
+              v(r.bank), v(r.est), r.LoanStatus, v(r.lender)] for r in by_date.itertuples()]
+    loan_pts = list(zip(by_date.lat, by_date.lon))
     u = pd.read_csv(PROC / "condo_units.csv", dtype=str)
     u = u[u.counted == "True"].copy()
     ring = set(pd.read_csv(PROC / "hospital_regimes.csv", dtype=str).regime)
@@ -190,8 +216,9 @@ def sba_tables(d):
     buys = [[r.Program, r.BorrName, r.BorrStreet, r.PROPERTY_CITY, r.NaicsDescription.strip(), r.date.strftime("%Y-%m-%d"), r.deed.strftime("%Y-%m-%d"), int(r.gap),
              v(r.amt), v(r.bank), r.est, int(r.sf), round(r.est / r.sf), r.uid, "Address + suite" if r.s else "Address + deed date", r.OWNER_NAME1, r.use,
              "Yes" if r.regime in ring else "No"] for r in m.sort_values("date", ascending=False).itertuples()]
-    log(f"SBA: {len(loans)} real-estate style healthcare loans, {len(buys)} tied to a Dallas County condo suite")
-    return loans, buys
+    buy_pts = list(zip(*[m.sort_values("date", ascending=False)[c] for c in ("lat", "lon")]))
+    log(f"SBA: {len(loans)} real-estate style healthcare loans, {len(buys)} tied to a Dallas County condo suite, {d.lat.notna().sum()} loans mapped")
+    return loans, buys, loan_pts, buy_pts
 
 
 def main():
@@ -340,13 +367,13 @@ def main():
     wb = Workbook()
     ws = wb.active
     ws.title = "Ring Summary"
-    xl.sheet(ws, ["Hospital", "Licensed Beds", "Condo Suites", "Independent Medical Suites", "Indep. Medical Sold in Last 3 Yrs",
-                  "Physicians in Indep. Bldgs", "Dentists in Indep. Bldgs", "Other Outpatient in Indep. Bldgs",
-                  "Owner-user Providers in Indep. Bldgs", "Practice Locations in Indep. Bldgs", "Candidate Buildings",
-                  "Candidate Bldg SF", "Candidates: Medical Office", "Candidates: Office / Flex", "Candidates: Retail"],
+    ring_head = ["Hospital", "Licensed Beds", "Condo Suites", "Independent Medical Suites", "Indep. Medical Sold in Last 3 Yrs",
+                 "Physicians in Indep. Bldgs", "Dentists in Indep. Bldgs", "Other Outpatient in Indep. Bldgs",
+                 "Owner-user Providers in Indep. Bldgs", "Practice Locations in Indep. Bldgs", "Candidate Buildings",
+                 "Candidate Bldg SF", "Candidates: Medical Office", "Candidates: Office / Flex", "Candidates: Retail"]
+    xl.sheet(ws, ring_head,
              srows, [44, 9, 9, 11, 11, 11, 11, 11, 12, 12, 10, 12, 10, 10, 10], {"L": "#,##0"})
-    xl.sheet(wb.create_sheet("Candidate Buildings"),
-             ["Nearest Hospital", "Distance (mi)", "Hospital Rings Containing", "Address", "City", "Property Name", "DCAD Bldg Class",
+    cand_head = ["Nearest Hospital", "Distance (mi)", "Hospital Rings Containing", "Address", "City", "Property Name", "DCAD Bldg Class",
               "Use", "Bldg SF", "Net Leasable SF", "Yr Built", "Remodel Yr", "Stories", "DCAD Quality", "DCAD Condition",
               "DCAD Value", "Value / SF", "Latest Deed", "Owner", "Owner 2", "Owner Type", "Owner Mailing Address", "Owner State",
               "Physicians in Bldg", "Dentists in Bldg", "Other Outpatient in Bldg", "All Clinicians in Bldg",
@@ -354,7 +381,8 @@ def main():
               "CoStar ID", "CoStar Name", "CoStar Type", "CoStar Secondary Type", "CoStar Class", "CoStar RBA", "CoStar Parking Spaces",
               "CoStar Parking Ratio", "CoStar Condo", "CoStar % Leased", "CoStar Available SF", "CoStar Rent/SF/Yr", "CoStar For Sale",
               "CoStar For Sale $/SF", "CoStar Last Sale Date", "CoStar Last Sale Price", "CoStar True Owner", "CoStar Properties on Parcel",
-              "CoStar Match", "CoStar vs DCAD Size"],
+              "CoStar Match", "CoStar vs DCAD Size"]
+    xl.sheet(wb.create_sheet("Candidate Buildings"), cand_head,
              rows, [38, 9, 9, 28, 12, 26, 24, 16, 10, 10, 8, 8, 7, 10, 10, 13, 9, 11, 34, 20, 18, 44, 7, 9, 9, 9, 9, 9, 8, 20, 20,
                     11, 26, 20, 16, 7, 10, 9, 8, 7, 8, 10, 14, 7, 9, 11, 13, 30, 9, 14, 11],
              {"B": "0.00", "I": "#,##0", "J": "#,##0", "P": "$#,##0", "Q": "$#,##0", "AK": "#,##0", "AP": "#,##0", "AU": "$#,##0"})
@@ -362,33 +390,32 @@ def main():
         cs["status"] = [why_not(r) for r in cs.itertuples()]
         log(f"CoStar status: {cs.status.value_counts().to_dict()}")
         cs["dcls"] = cs.par.map(b_all.cls)
+        rv = cs.rename(columns={"Property Address": "address", "Property Name": "name_", "Property Type": "ptype",
+                                "Secondary Type": "stype", "True Owner Name": "owner_"}).sort_values(["status", "address"])
+        rv = rv[(rv.status != "Candidate") | (rv.Condo == "Yes")]
         review = [[r.status, r.Condo, s(r.address), s(r.City), s(r.name_), s(r.ptype), s(r.stype), n(r.RBA), s(r.dcls), s(r.owner_), r.PropertyID, s(r.how)]
-                  for r in cs.rename(columns={"Property Address": "address", "Property Name": "name_", "Property Type": "ptype",
-                                              "Secondary Type": "stype", "True Owner Name": "owner_"}).sort_values(["status", "address"]).itertuples()
-                  if r.status != "Candidate" or r.Condo == "Yes"]
-        xl.sheet(wb.create_sheet("CoStar Review"),
-                 ["Status vs DCAD", "CoStar Condo", "Address", "City", "CoStar Name", "CoStar Type", "CoStar Secondary Type", "CoStar RBA",
-                  "DCAD Bldg Class", "CoStar True Owner", "CoStar ID", "CoStar Match"],
-                 review, [32, 8, 30, 12, 28, 24, 18, 10, 24, 30, 11, 14], {"H": "#,##0"})
+                  for r in rv.itertuples()]
+        review_head = ["Status vs DCAD", "CoStar Condo", "Address", "City", "CoStar Name", "CoStar Type", "CoStar Secondary Type", "CoStar RBA",
+                       "DCAD Bldg Class", "CoStar True Owner", "CoStar ID", "CoStar Match"]
+        xl.sheet(wb.create_sheet("CoStar Review"), review_head, review, [32, 8, 30, 12, 28, 24, 18, 10, 24, 30, 11, 14], {"H": "#,##0"})
     comps = load_comps(hg)
     if comps is not None:
-        xl.sheet(wb.create_sheet("Comp Summary"),
-                 ["Sale Kind", "Area", "Segment", "Closed Sale Records", "Owner-user Sales", "Inside a 1-mile Ring", "Prices Counted",
-                  "Median $/SF", "Low $/SF", "High $/SF", "Asking Prices", "Median Asking $/SF", "First Sale", "Last Sale"],
-                 comp_summary(comps), [10, 16, 16, 9, 9, 9, 8, 8, 8, 8, 8, 9, 11, 11], {c_: "$#,##0" for c_ in "HIJL"})
+        sum_head = ["Sale Kind", "Area", "Segment", "Closed Sale Records", "Owner-user Sales", "Inside a 1-mile Ring", "Prices Counted",
+                    "Median $/SF", "Low $/SF", "High $/SF", "Asking Prices", "Median Asking $/SF", "First Sale", "Last Sale"]
+        xl.sheet(wb.create_sheet("Comp Summary"), sum_head, comp_summary(comps), [10, 16, 16, 9, 9, 9, 8, 8, 8, 8, 8, 9, 11, 11], {c_: "$#,##0" for c_ in "HIJL"})
         xl.sheet(wb.create_sheet("Condo Comps"), COMP_HEAD, comp_rows(comps[comps.kind == "Condo"]), COMP_W, COMP_FMT)
         xl.sheet(wb.create_sheet("Building Comps"), COMP_HEAD, comp_rows(comps[comps.kind == "Building"]), COMP_W, COMP_FMT)
     sba = load_sba()
     if sba is not None:
-        loans, buys = sba_tables(sba)
-        xl.sheet(wb.create_sheet("SBA Suite Purchases"),
-                 ["Program", "Borrower", "Borrower Address", "City", "Industry", "Loan Date", "DCAD Deed Date", "Days Apart", "SBA or 7(a) Loan", "504 Bank Loan",
-                  "Est. Price", "Suite SF", "Est. $/SF", "DCAD Unit", "Match", "DCAD Owner", "DCAD Use", "In 1-mile Ring"],
+        loans, buys, loan_pts, buy_pts = sba_tables(sba)
+        buy_head = ["Program", "Borrower", "Borrower Address", "City", "Industry", "Loan Date", "DCAD Deed Date", "Days Apart", "SBA or 7(a) Loan", "504 Bank Loan",
+                    "Est. Price", "Suite SF", "Est. $/SF", "DCAD Unit", "Match", "DCAD Owner", "DCAD Use", "In 1-mile Ring"]
+        loan_head = ["Program", "County", "Borrower", "Borrower Address", "City", "ZIP", "Industry", "Loan Date", "Term (mo)", "SBA or 7(a) Loan", "504 Bank Loan",
+                     "Est. Project Cost", "Status", "Lender"]
+        xl.sheet(wb.create_sheet("SBA Suite Purchases"), buy_head,
                  buys, [8, 32, 34, 18, 34, 11, 11, 7, 12, 12, 12, 8, 8, 8, 18, 30, 15, 7],
                  {"I": "$#,##0", "J": "$#,##0", "K": "$#,##0", "L": "#,##0", "M": "$#,##0"})
-        xl.sheet(wb.create_sheet("SBA Loans"),
-                 ["Program", "County", "Borrower", "Borrower Address", "City", "ZIP", "Industry", "Loan Date", "Term (mo)", "SBA or 7(a) Loan", "504 Bank Loan",
-                  "Est. Project Cost", "Status", "Lender"],
+        xl.sheet(wb.create_sheet("SBA Loans"), loan_head,
                  loans, [8, 9, 34, 34, 15, 7, 36, 11, 7, 12, 12, 12, 8, 34], {"J": "$#,##0", "K": "$#,##0", "L": "$#,##0"})
     wm = wb.create_sheet("Method & Notes")
     notes = [
@@ -445,6 +472,56 @@ def main():
     out = PRIVATE / "Hospital Ring Conversion Candidates (PRIVATE).xlsx"
     wb.save(out)
     log(f"wrote {out.relative_to(OUT.parent)} ({len(rows)} candidate buildings)")
+
+    # everything above as private.json for the local private map (pipeline/serve_private.py)
+    bs = b.sort_values(["SF"], ascending=False)
+    shapes = gpd.GeoSeries(geo.reindex(bs.GIS_PARCEL_ID).values, crs=CRS_FT).to_crs(4326).simplify(0.00001)
+    cand_items = [{"lat": round(pt.y, 6), "lon": round(pt.x, 6), "g": [polyline(x) for x in poly_rings(gm)], "rings": [x[1] for x in near_],
+                   "code": code, "f": dict(zip(cand_head, row))}
+                  for row, gm, pt, near_, code in zip(rows, shapes, shapes.representative_point(), bs.near, bs.code)]
+
+    def items(head, table, pts):
+        return [{"lat": la, "lon": lo, "f": dict(zip(head, row))} for row, (la, lo) in zip(table, pts) if pd.notna(la) and pd.notna(lo)]
+
+    def latlon(frame):
+        return list(zip(pd.to_numeric(frame.Latitude), pd.to_numeric(frame.Longitude)))
+
+    layers = {"cand": cand_items}
+    sheets = [{"title": "Ring summary", "note": f"DCAD {SETTINGS['dcad_year']} roll, CMS NPI Registry, public map counts. Rings overlap, so rows do not add up.",
+               "head": ring_head, "rows": srows}]
+    if cs is not None:
+        layers["review"] = items(review_head, review, latlon(rv))
+    if comps is not None:
+        for key, kind in (("condo", "Condo"), ("bldg", "Building")):
+            k = comps[comps.kind == kind]
+            layers[key] = items(COMP_HEAD, comp_rows(k), latlon(k.sort_values("date", ascending=False, na_position="last")))
+        sheets.append({"title": "Sale comp summary", "note": "CoStar, exported 11/3/2026. Condo comps cover 5 years, building comps only 12 months. Read medians with their counts.",
+                       "head": sum_head, "rows": comp_summary(comps)})
+    if sba is not None:
+        layers["buys"] = items(buy_head, buys, buy_pts)
+        layers["loans"] = items(loan_head, loans, loan_pts)
+    clean = lambda o: {k: clean(v) for k, v in o.items()} if isinstance(o, dict) else [clean(v) for v in o] if isinstance(o, (list, tuple)) else (  # noqa: E731
+        None if isinstance(o, float) and o != o else o)
+    payload = json.dumps(clean({"layers": layers, "sheets": sheets, "costarAsOf": cs_asof, "built": d["built"]}),
+                         separators=(",", ":"), default=lambda o: o.item() if hasattr(o, "item") else str(o))
+    encrypt_deal_data(payload)
+    log("docs/deal-data.bin written (encrypted): " + str({k: len(v) for k, v in layers.items()}))
+
+
+def encrypt_deal_data(payload):
+    """Write the deal layers to docs/deal-data.bin, readable only with the key in outputs/private (never in git).
+
+    gzip, then AES-256-GCM with a PBKDF2 key: salt (16 bytes) + nonce (12) + ciphertext. docs/deal_layer.js reverses it.
+    Also writes 'Open My Map.url', a double-click link that carries the key after the # (browsers don't send that part to the server).
+    """
+    key_file = PRIVATE / "map-key.txt"
+    if not key_file.exists():
+        key_file.write_text(secrets.token_urlsafe(32))
+    key = key_file.read_text().strip()
+    salt, nonce = os.urandom(16), os.urandom(12)
+    aes = AESGCM(PBKDF2HMAC(hashes.SHA256(), 32, salt, KDF_ROUNDS).derive(key.encode()))
+    (DOCS / "deal-data.bin").write_bytes(salt + nonce + aes.encrypt(nonce, gzip.compress(payload.encode("utf-8"), 9), None))
+    (PRIVATE / "Open My Map.url").write_text(f"[InternetShortcut]\nURL={MAP_URL}#key={key}\n")
 
 
 if __name__ == "__main__":

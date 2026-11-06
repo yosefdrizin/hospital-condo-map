@@ -29,6 +29,14 @@ geocodes addresses (a few minutes) and fetches imagery (5 to 10 min). Later runs
 
 Publish: commit and push `docs/`. GitHub Pages serves `docs/` from the main branch.
 
+## Deal data on the map (one map, one link)
+The owner uses the live map alone. Candidates, CoStar, comps and SBA borrowers sit on it inside `docs/deal-data.bin`, encrypted (AES-256-GCM) by step 7.
+`docs/deal_layer.js` decrypts it in the browser with a key; without the key the page is the plain public map. Open it with `outputs/private/Open My Map.url`:
+the key travels after the # (never sent to the server) and is then remembered in that browser. "Lock" on the page forgets it.
+The key is `outputs/private/map-key.txt`. It must never go in git, docs/, chat or a commit. Keep the same key across rebuilds, since old blobs stay in git history.
+To add data: put files in the right `data/raw/` folder, run `python pipeline/run_all.py --only 7`, then commit and push `docs/deal-data.bin`. New layers go in `LAYERS` in deal_layer.js.
+Never put that data in `docs/` unencrypted, including data.json, index.html or deal_layer.js.
+
 ## Pipeline (pipeline/)
 | Step | File | Does | Writes |
 |---|---|---|---|
@@ -38,7 +46,7 @@ Publish: commit and push `docs/`. GitHub Pages serves `docs/` from the main bran
 | 4 | 04_basemap.py | USGS Imagery Topo tiles + USDA NAIP aerials stitched per hospital | docs/img/, docs/basemap.json |
 | 5 | 05_build_site.py | Everything the page needs | docs/data.json |
 | 6 | 06_build_excel.py | Plain internal workbook (committed, so effectively public) | outputs/*.xlsx |
-| 7 | 07_targets.py | PRIVATE conversion candidates workbook: owner names + mailing addresses | outputs/private/ (git-ignored) |
+| 7 | 07_targets.py | PRIVATE conversion candidates workbook (owner names + mailing addresses) and the encrypted map data | outputs/private/ (git-ignored), docs/deal-data.bin |
 
 Shared logic lives in `pipeline/common.py`: paths, settings, ownership regexes, use buckets, polyline encoding.
 Hospitals are in `config/hospitals.csv` (name, system, address, beds, lat/lon, notes). Knobs are in `config/settings.json`.
@@ -58,8 +66,8 @@ Hospitals are in `config/hospitals.csv` (name, system, address, beds, lat/lon, n
 - **Dentists / other outpatient**: taxonomy groups in `common.PROVIDER_GROUPS` (dentists 1223*; other outpatient = chiro, PT, OT,
   optometry, podiatry, psychology, counseling, clinical social work, MFT, audiology, speech). NPs/PAs are in All clinicians only.
 - **Practice locations**: distinct building + suite among physicians, dentists and other outpatient in independent buildings.
-- **Conversion candidates** (private workbook only): non-condo office / medical office / retail parcel within 1 mile, one titled owner,
-  not hospital or health system, 2,500+ SF. Never put this list, owner mailing addresses or the outputs/private folder in docs/ or git.
+- **Conversion candidates** (private workbook and encrypted map data only): non-condo office / medical office / retail parcel within 1 mile, one titled owner,
+  not hospital or health system, 2,500+ SF. Never put this list, owner mailing addresses or the outputs/private folder in git or in docs/ unencrypted.
 - **Structure** (secondary view): owner-user suites (fragmented ownership), single-owner/controlled (one owner 75%+),
   mixed-use master (commercial units inside an apartment/garage regime).
 
@@ -87,7 +95,7 @@ Some source labels in the page footer are hard-coded (DCAD roll date, TIGER year
   the first time; it is cached as data/cache/parcels.pkl.
 - GitHub limits: 100 MB per file. `data/raw` and `data/cache` are git-ignored; never commit them.
 - The site is public. Do not add owner mailing addresses, phone numbers or individual provider records to docs/.
-- CoStar exports go in `data/raw/costar/*.xlsx` (git-ignored). Licensed data: step 7 joins it into outputs/private only, never docs/ or git.
+- CoStar exports go in `data/raw/costar/*.xlsx` (git-ignored). Licensed data: step 7 joins it into outputs/private and the encrypted blob only.
   Parcel match is by address, then CoStar pin. The 11/3/2026 export covers about 5,000 to 100,000 SF, so smaller and larger candidates have blank CoStar columns.
 - CoStar sale comps go in `data/raw/costar_comps/` (git-ignored), never in `data/raw/costar/`, which step 7 reads as property exports. Files starting "condo" are suite sales;
   the rest are whole buildings. Texas doesn't disclose sale prices, so few rows have one: never present a comp median without its count.

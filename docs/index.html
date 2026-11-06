@@ -238,6 +238,7 @@ a{color:var(--green-dk);text-underline-offset:2px}
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="deal_layer.js" defer></script>
 <script>
 (function(){
 const $=s=>document.querySelector(s);
@@ -336,6 +337,7 @@ function init(data){
   fitAll();renderOverview();refresh();
   const mq=matchMedia('(prefers-color-scheme: dark)');mq.addEventListener&&mq.addEventListener('change',restyle);
   new MutationObserver(restyle).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
+  window.HCM={map,D,state,esc,fmt,money,title,decode,MI,selectHosp,renderOverview,clearSel,refresh};window.dispatchEvent(new Event('hcm-ready'));
 }
 function shortName(n){return n.replace(' (incl. Zale Lipshy Pavilion)','').replace('Baylor Scott & White Medical Center - Irving','BSW Irving').replace('Texas Health Presbyterian Hospital Dallas','Texas Health Presbyterian').replace('Methodist Richardson - Campbell Rd Campus','Methodist Richardson (Campbell)').replace('UTSW Clements University Hospital','UTSW Clements').replace('Children\'s Medical Center Dallas','Children\'s Dallas').replace('Advanced Dallas Hospital and Clinics','Advanced Dallas').replace(' Hospital','').replace(' Medical Center','')}
 // Fitting into a 0-size box (hidden or still-opening pane) jumps to maxZoom, so wait for a real size.
