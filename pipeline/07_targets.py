@@ -44,6 +44,19 @@ COMP_FMT = {"K": "#,##0", "O": "$#,##0", "P": "$#,##0", "Q": "$#,##0", "R": "$#,
 SBA_NAICS = ("6211", "6212", "6213", "6214")     # offices of physicians, dentists, other practitioners; outpatient centers
 SBA_COUNTIES = ("DALLAS", "COLLIN", "DENTON", "TARRANT")
 SBA_MIN_TERM = 240                                # a long 7(a) term usually means real estate; the data has no purpose field
+# Default ranking settings. The map lets the owner change every one of these live; they're saved in his browser.
+# Weights inside each group are relative (they're divided by the group total). Values in useVal / condVal are 0-100.
+RANK = {
+    "parts": {"own": 100, "dem": 100, "easy": 100},
+    "own": {"sale": 35, "hold": 25, "away": 15, "person": 10, "vac": 10, "old": 5},
+    "dem": {"prac": 50, "sba": 30, "comp": 20},
+    "easy": {"size": 30, "use": 30, "park": 15, "stor": 10, "cond": 15},
+    "opts": {"budget": 3_000_000, "holdFull": 25, "awayLocal": 60, "oldBefore": 1990, "sizeBest": 15000, "sizeOk": 25000,
+             "parkTarget": 4, "maxStories": 2, "top1": 25, "top2": 100},
+    "useVal": {"Medical office": 100, "Office": 70, "Office/showroom (flex)": 60, "Retail": 40, "Other": 20},
+    "condVal": {"Good": 100, "Fair": 50, "Poor": 10, "Unknown": 60},
+}
+ENTITY_RE = r"\b(?:LLC|L L C|INC|LP|L P|LTD|CORP|CO|COMPANY|PARTNERS|PARTNERSHIP|HOLDINGS|PROPERTIES|INVESTMENTS|REIT|FUND|BANK|CHURCH|CITY OF|COUNTY|ISD|STATE OF|ASSOC|ASSN|GROUP|VENTURES|CAPITAL|REALTY|DEVELOPMENT)\b"
 OWNER_TYPE = {"P": "Medical practice name", "I": "Investor / other"}
 
 
@@ -221,6 +234,109 @@ def sba_tables(d):
     return loans, buys, loan_pts, buy_pts
 
 
+def rank_parts(sig, R):
+    """Part scores (0-1) and overall score (0-100) from raw signals. Mirrors score() in docs/deal_layer.js: change both together."""
+    o, w = R["opts"], lambda grp: {k: v / (sum(R[grp].values()) or 1) for k, v in R[grp].items()}
+    wo, wd, we = w("own"), w("dem"), w("easy")
+    away = sig.away.map({2: 1.0, 1: o["awayLocal"] / 100, 0: 0.0})
+    own = (wo["sale"] * sig.sale + wo["hold"] * (sig.yrs / o["holdFull"]).clip(0, 1) + wo["away"] * away + wo["person"] * sig.person
+           + wo["vac"] * sig.vac.fillna(0) + wo["old"] * ((sig.yr > 0) & (sig.yr < o["oldBefore"])))
+    dem = wd["prac"] * sig.pp + wd["sba"] * sig.ps + wd["comp"] * (1 - sig.pc)
+    size = sig.sf.map(lambda v: 1 if v <= o["sizeBest"] else 0.6 if v <= o["sizeOk"] else 0.2)
+    use = sig.use.map(lambda u: R["useVal"].get(u, R["useVal"]["Other"]) / 100)
+    pk = sig.park.map(lambda v: 0.5 if v != v else 1 if v >= o["parkTarget"] else 0.5 if v >= o["parkTarget"] - 1 else 0)
+    st = sig.st.map(lambda v: 0.6 if not v > 0 else 1 if v <= o["maxStories"] else 0.5 if v <= o["maxStories"] + 1 else 0.2)
+    cond = sig.cond.map(lambda c: R["condVal"][c] / 100)
+    easy = we["size"] * size + we["use"] * use + we["park"] * pk + we["stor"] * st + we["cond"] * cond
+    p = R["parts"]
+    score = (100 * (p["own"] * own + p["dem"] * dem + p["easy"] * easy) / (sum(p.values()) or 1)).round().astype(int)
+    return {"own": own, "dem": dem, "easy": easy, "score": score}
+
+
+def score_candidates(b, costar_row, geo, sba_pts):
+    """Rank candidates for a buyer-converter: owner likely to sell, buyer demand nearby, easy to convert (equal thirds).
+
+    Each part is 0 to 1; score = 100 x their average. Rank runs only over buildings with DCAD value within BUDGET.
+    A ranking of research priority, not a valuation. Weights are in the comments below so they can be tuned.
+    """
+    b = b.reset_index(drop=True)
+    pts = gpd.GeoDataFrame({"i": range(len(b))}, geometry=gpd.GeoSeries(geo.reindex(b.GIS_PARCEL_ID).values, crs=CRS_FT).representative_point().values, crs=CRS_FT)
+
+    def near(points, radius, col=None):
+        if points is None or points.empty:
+            return pd.Series(0, index=b.index)
+        j = gpd.sjoin(pts.assign(geometry=pts.buffer(radius)), points, predicate="contains")
+        c = j.groupby("i")[col].nunique() if col else j.groupby("i").size()
+        return c.reindex(b.index, fill_value=0)
+
+    pv = pd.read_csv(PROC / "npi_providers_near.csv", dtype=str)
+    pv = pv[(pv.hs_bldg == "False") & pv.grp.isin(["ph", "dn", "ot"])]
+    pvg = gpd.GeoDataFrame(pv[["ploc"]], geometry=gpd.points_from_xy(pd.to_numeric(pv.lon), pd.to_numeric(pv.lat)), crs=4326).to_crs(CRS_FT)
+    sp = pd.DataFrame(sba_pts, columns=["lat", "lon"]).dropna() if sba_pts else pd.DataFrame(columns=["lat", "lon"])
+    sg = gpd.GeoDataFrame(geometry=gpd.points_from_xy(sp.lon, sp.lat), crs=4326).to_crs(CRS_FT)
+    u = pd.read_csv(PROC / "condo_units.csv", dtype=str)
+    u = u[(u.counted == "True") & (u.use == "Medical office") & (u.owner_class != "H")]
+    rg = gpd.read_file(PROC / "regimes.gpkg")
+    rg = rg.set_index("Acct").geometry.representative_point()
+    cu = gpd.GeoDataFrame(geometry=rg.reindex(u.regime).dropna().values, crs=CRS_FT)
+    b["prac"], b["sba1"], b["comp"] = near(pvg, MILE_FT / 2, "ploc"), near(sg, MILE_FT), near(cu, MILE_FT)
+    pct = lambda x: x.rank(pct=True, method="average")  # noqa: E731
+
+    # raw signals, one value per building; RANK turns them into a score (docs/deal_layer.js does the same live)
+    yrs = ((pd.Timestamp.today() - b.deed).dt.days / 365.25).fillna(0)
+    rows = [costar_row(par, sf) for par, sf in zip(b.GIS_PARCEL_ID, b.SF)]
+    for_sale = pd.Series([t is not None and t["For Sale Status"] == "Y" for t in rows])
+    leased = pd.Series([t["Percent Leased"] if t is not None else float("nan") for t in rows])
+    park = pd.Series([t["Parking Ratio"] if t is not None else float("nan") for t in rows])
+    st, mz = b.mst.fillna("").str.strip().str.upper(), b.mzip.fillna("").str[:3]
+    out_state = ~st.isin(["TX", "TEXAS", ""])                      # DCAD spells the state out
+    own = b.owner.fillna("").str.upper()
+    uses = pd.Series([use_category(c, s) for c, s in zip(b.cls, b.sptd)])          # the main building's use, not any account on the parcel
+    cond = b.cond.fillna("").str.upper().map(lambda c: "Good" if re.search("EXCEL|GOOD|AVERAGE", c) else "Fair" if "FAIR" in c else "Poor" if c else "Unknown")
+    sig = pd.DataFrame({
+        "sale": for_sale.astype(int), "yrs": yrs.round(1),
+        "away": out_state.astype(int) * 2 + (~out_state & ~mz.isin(["750", "751", "752", "753"]) & mz.ne("")).astype(int),
+        "person": (own.str.contains(r"TRUST|ESTATE|LIVING|FAMILY|\bETAL\b|\bET AL\b") | ~own.str.contains(ENTITY_RE)).astype(int),
+        "vac": ((100 - leased) / 100).clip(0, 1).round(2), "yr": b.YR.fillna(0).astype(int),
+        "prac": b.prac, "sba": b.sba1, "comp": b.comp, "pp": pct(b.prac).round(4), "ps": pct(b.sba1).round(4), "pc": pct(b.comp).round(4),
+        "sf": b.SF.round().astype(int), "use": uses, "park": park.round(2), "st": b.ST.fillna(0).astype(int), "cond": cond,
+        "val": b.val.fillna(0).round().astype(int)})
+    parts = rank_parts(sig, RANK)
+    b["s_own"], b["s_dem"], b["s_easy"], b["score"] = parts["own"], parts["dem"], parts["easy"], parts["score"]
+    b["yrs"] = yrs.round().astype(int)
+    budget = b.val.fillna(0) <= RANK["opts"]["budget"]
+    b["rank"] = b.score.where(budget).rank(ascending=False, method="first")
+    t1, t2 = RANK["opts"]["top1"], RANK["opts"]["top2"]
+    b["tier"] = b["rank"].map(lambda r: f"Top {t1}" if r <= t1 else f"Top {t2}" if r <= t2 else "In budget" if r == r else "")
+    b.loc[~budget, "tier"] = "Over budget"
+    b["sig"] = sig.to_dict("records")
+
+    def why(i):
+        r = b.loc[i]
+        bits = []
+        if for_sale[i]:
+            bits.append("For sale")
+        if r.yrs >= 15:
+            bits.append(f"Owned {r.yrs} yrs")
+        if out_state[i]:
+            bits.append(f"Owner in {st[i].title()}")
+        elif sig.away[i] == 1:
+            bits.append("Owner outside Dallas area")
+        if leased[i] == leased[i] and leased[i] < 80:
+            bits.append(f"{leased[i]:.0f}% leased")
+        bits.append(f"{r.prac} practices within 1/2 mi")
+        if r.sba1:
+            bits.append(f"{r.sba1} SBA loan{'s' if r.sba1 > 1 else ''} within 1 mi")
+        bits.append(f"{int(r.SF):,} SF {uses[i].lower()}")
+        if park[i] == park[i]:
+            bits.append(f"parking {park[i]:.1f}/1,000")
+        return " · ".join(bits)
+
+    b["why"] = [why(i) for i in b.index]
+    log(f"scored {len(b):,} candidates; {int(budget.sum()):,} within ${RANK['opts']['budget'] / 1e6:g}M DCAD value")
+    return b.sort_values(["rank", "score"], ascending=[True, False], na_position="last").reset_index(drop=True)
+
+
 def main():
     PRIVATE.mkdir(parents=True, exist_ok=True)
     radius = SETTINGS["radius_miles"] * MILE_FT
@@ -341,17 +457,29 @@ def main():
         tail = " ".join(x for x in (s(r.mcity), s(r.mst), s(r.mzip)[:5]) if x)
         return ", ".join([*lines, tail])
 
+    def costar_row(par, dcad_sf):
+        """The parcel's CoStar row when its size agrees with DCAD within 25%, else None."""
+        g = cmap.get(par)
+        if g is None or not dcad_sf or pd.isna(g.iloc[0].RBA):
+            return None
+        return g.iloc[0] if 0.75 <= g.iloc[0].RBA / dcad_sf <= 1.25 else None
+
+    sba = load_sba()
+    sba_out = sba_tables(sba) if sba is not None else None
+    b = score_candidates(b, costar_row, geo, sba_out[2] if sba_out else None)
+
     rows = []
-    for r in b.sort_values(["SF"], ascending=False).itertuples():
+    for r in b.itertuples():
         nh, nd = r.near[0][1], r.near[0][0]
-        rows.append([nh, nd, len(r.near), f"{s(r.num)} {s(r.street)}".strip(), s(r.city),
+        rows.append([None if r.rank != r.rank else int(r.rank), r.tier, r.score, r.why, nh, nd, len(r.near), f"{s(r.num)} {s(r.street)}".strip(), s(r.city),
                      r.name if isinstance(r.name, str) and r.name != "UNASSIGNED" else "", s(r.cls), use_category(r.cls, r.sptd),
                      int(r.SF), int(r.NRA) if r.NRA > 0 else None, int(r.YR) if r.YR > 0 else None,
                      int(r.REM) if r.REM > 0 else None, int(r.ST) if r.ST > 0 else None, s(r.qual), s(r.cond),
                      int(r.val) if pd.notna(r.val) else None, round(r.val / r.SF) if pd.notna(r.val) and r.SF else None,
                      r.deed.strftime("%Y-%m-%d") if pd.notna(r.deed) else "", s(r.owner), s(r.owner2),
                      OWNER_TYPE.get(owner_class(s(r.owner)), "Investor / other"), mail(r), s(r.mst),
-                     r.ph, r.dn, r.ot, r.cl, r.px, r.accts, r.acct, r.GIS_PARCEL_ID, *costar_cols(r.GIS_PARCEL_ID, r.SF)])
+                     r.ph, r.dn, r.ot, r.cl, r.px, r.accts, r.acct, r.GIS_PARCEL_ID, *costar_cols(r.GIS_PARCEL_ID, r.SF),
+                     round(100 * r.s_own), round(100 * r.s_dem), round(100 * r.s_easy), r.prac, r.sba1, r.comp, r.yrs])
 
     # ring summary from the site data (supply) + this step (candidates)
     d = json.loads((DOCS / "data.json").read_text())
@@ -373,7 +501,7 @@ def main():
                  "Candidate Bldg SF", "Candidates: Medical Office", "Candidates: Office / Flex", "Candidates: Retail"]
     xl.sheet(ws, ring_head,
              srows, [44, 9, 9, 11, 11, 11, 11, 11, 12, 12, 10, 12, 10, 10, 10], {"L": "#,##0"})
-    cand_head = ["Nearest Hospital", "Distance (mi)", "Hospital Rings Containing", "Address", "City", "Property Name", "DCAD Bldg Class",
+    cand_head = ["Rank", "Tier", "Score", "Why", "Nearest Hospital", "Distance (mi)", "Hospital Rings Containing", "Address", "City", "Property Name", "DCAD Bldg Class",
               "Use", "Bldg SF", "Net Leasable SF", "Yr Built", "Remodel Yr", "Stories", "DCAD Quality", "DCAD Condition",
               "DCAD Value", "Value / SF", "Latest Deed", "Owner", "Owner 2", "Owner Type", "Owner Mailing Address", "Owner State",
               "Physicians in Bldg", "Dentists in Bldg", "Other Outpatient in Bldg", "All Clinicians in Bldg",
@@ -381,11 +509,15 @@ def main():
               "CoStar ID", "CoStar Name", "CoStar Type", "CoStar Secondary Type", "CoStar Class", "CoStar RBA", "CoStar Parking Spaces",
               "CoStar Parking Ratio", "CoStar Condo", "CoStar % Leased", "CoStar Available SF", "CoStar Rent/SF/Yr", "CoStar For Sale",
               "CoStar For Sale $/SF", "CoStar Last Sale Date", "CoStar Last Sale Price", "CoStar True Owner", "CoStar Properties on Parcel",
-              "CoStar Match", "CoStar vs DCAD Size"]
+              "CoStar Match", "CoStar vs DCAD Size",
+              "Owner Likely to Sell (0-100)", "Buyer Demand Nearby (0-100)", "Easy to Convert (0-100)", "Practices within 1/2 mi",
+              "SBA Loans within 1 mi", "Indep. Medical Condo Suites within 1 mi", "Years Held"]
+    fmt_by = {"Distance (mi)": "0.00", "Bldg SF": "#,##0", "Net Leasable SF": "#,##0", "DCAD Value": "$#,##0", "Value / SF": "$#,##0",
+              "CoStar RBA": "#,##0", "CoStar Available SF": "#,##0", "CoStar Last Sale Price": "$#,##0"}
     xl.sheet(wb.create_sheet("Candidate Buildings"), cand_head,
-             rows, [38, 9, 9, 28, 12, 26, 24, 16, 10, 10, 8, 8, 7, 10, 10, 13, 9, 11, 34, 20, 18, 44, 7, 9, 9, 9, 9, 9, 8, 20, 20,
-                    11, 26, 20, 16, 7, 10, 9, 8, 7, 8, 10, 14, 7, 9, 11, 13, 30, 9, 14, 11],
-             {"B": "0.00", "I": "#,##0", "J": "#,##0", "P": "$#,##0", "Q": "$#,##0", "AK": "#,##0", "AP": "#,##0", "AU": "$#,##0"})
+             rows, [6, 12, 6, 60, 38, 9, 9, 28, 12, 26, 24, 16, 10, 10, 8, 8, 7, 10, 10, 13, 9, 11, 34, 20, 18, 44, 7, 9, 9, 9, 9, 9, 8, 20, 20,
+                    11, 26, 20, 16, 7, 10, 9, 8, 7, 8, 10, 14, 7, 9, 11, 13, 30, 9, 14, 11, 9, 9, 9, 9, 9, 9, 7],
+             {xl.L(cand_head.index(k) + 1): v for k, v in fmt_by.items()})
     if cs is not None:
         cs["status"] = [why_not(r) for r in cs.itertuples()]
         log(f"CoStar status: {cs.status.value_counts().to_dict()}")
@@ -405,9 +537,8 @@ def main():
         xl.sheet(wb.create_sheet("Comp Summary"), sum_head, comp_summary(comps), [10, 16, 16, 9, 9, 9, 8, 8, 8, 8, 8, 9, 11, 11], {c_: "$#,##0" for c_ in "HIJL"})
         xl.sheet(wb.create_sheet("Condo Comps"), COMP_HEAD, comp_rows(comps[comps.kind == "Condo"]), COMP_W, COMP_FMT)
         xl.sheet(wb.create_sheet("Building Comps"), COMP_HEAD, comp_rows(comps[comps.kind == "Building"]), COMP_W, COMP_FMT)
-    sba = load_sba()
-    if sba is not None:
-        loans, buys, loan_pts, buy_pts = sba_tables(sba)
+    if sba_out:
+        loans, buys, loan_pts, buy_pts = sba_out
         buy_head = ["Program", "Borrower", "Borrower Address", "City", "Industry", "Loan Date", "DCAD Deed Date", "Days Apart", "SBA or 7(a) Loan", "504 Bank Loan",
                     "Est. Price", "Suite SF", "Est. $/SF", "DCAD Unit", "Match", "DCAD Owner", "DCAD Use", "In 1-mile Ring"]
         loan_head = ["Program", "County", "Borrower", "Borrower Address", "City", "ZIP", "Industry", "Loan Date", "Term (mo)", "SBA or 7(a) Loan", "504 Bank Loan",
@@ -426,6 +557,15 @@ def main():
                        f"one titled owner across all accounts on the parcel, at least {MIN_SF:,} SF, and not owned by a hospital or health system. "
                        "Multi-owner parcels, hospital-owned buildings, gas stations, fast food, convenience stores, auto, "
                        "car washes, supermarkets and theaters are left out."),
+        ("Ranking", f"Research order for a buyer-converter, not a valuation. Score 0-100 = average of three parts. Owner likely to sell: CoStar for sale 35%, "
+                    "years since last deed (full at 25) 25%, owner mails from out of state (or outside 750-753 ZIPs, partial) 15%, owner looks like a person, "
+                    "trust or estate 10%, CoStar vacancy 10%, built before 1990 5%. Buyer demand: practice locations (physicians, dentists, other outpatient) "
+                    "in independent buildings within 1/2 mile 50%, SBA healthcare real estate loans within 1 mile 30%, fewer independent medical condo suites "
+                    "within 1 mile 20% (each as a percentile among candidates). Easy to convert: size (2,500 to 15,000 SF best) 30%, use (medical office, "
+                    f"then office, then retail) 30%, CoStar parking 15%, 1 to 2 stories 10%, DCAD condition 15%. Ranked only where DCAD value is at most "
+                    f"${RANK['opts']['budget']:,}; DCAD usually runs below market. CoStar facts count only where CoStar and DCAD sizes agree within 25%. "
+                    "These are the default settings. On the map every weight and threshold can be changed, and the ranking there updates live; "
+                    "this sheet always shows the defaults."),
         ("Building facts", "DCAD commercial detail: gross building area, net leasable area, earliest year built, latest remodel year, "
                            "stories, DCAD quality and condition grades, total appraised value and latest deed transfer date. "
                            "Value / SF is DCAD value over gross SF, not a market price."),
@@ -474,11 +614,11 @@ def main():
     log(f"wrote {out.relative_to(OUT.parent)} ({len(rows)} candidate buildings)")
 
     # everything above as private.json for the local private map (pipeline/serve_private.py)
-    bs = b.sort_values(["SF"], ascending=False)
+    bs = b                                # same order as rows
     shapes = gpd.GeoSeries(geo.reindex(bs.GIS_PARCEL_ID).values, crs=CRS_FT).to_crs(4326).simplify(0.00001)
     cand_items = [{"lat": round(pt.y, 6), "lon": round(pt.x, 6), "g": [polyline(x) for x in poly_rings(gm)], "rings": [x[1] for x in near_],
-                   "code": code, "f": dict(zip(cand_head, row))}
-                  for row, gm, pt, near_, code in zip(rows, shapes, shapes.representative_point(), bs.near, bs.code)]
+                   "code": code, "s": sg, "f": dict(zip(cand_head, row))}
+                  for row, gm, pt, near_, code, sg in zip(rows, shapes, shapes.representative_point(), bs.near, bs.code, bs.sig)]
 
     def items(head, table, pts):
         return [{"lat": la, "lon": lo, "f": dict(zip(head, row))} for row, (la, lo) in zip(table, pts) if pd.notna(la) and pd.notna(lo)]
@@ -502,7 +642,7 @@ def main():
         layers["loans"] = items(loan_head, loans, loan_pts)
     clean = lambda o: {k: clean(v) for k, v in o.items()} if isinstance(o, dict) else [clean(v) for v in o] if isinstance(o, (list, tuple)) else (  # noqa: E731
         None if isinstance(o, float) and o != o else o)
-    payload = json.dumps(clean({"layers": layers, "sheets": sheets, "costarAsOf": cs_asof, "built": d["built"]}),
+    payload = json.dumps(clean({"layers": layers, "sheets": sheets, "rank": RANK, "costarAsOf": cs_asof, "built": d["built"]}),
                          separators=(",", ":"), default=lambda o: o.item() if hasattr(o, "item") else str(o))
     encrypt_deal_data(payload)
     log("docs/deal-data.bin written (encrypted): " + str({k: len(v) for k, v in layers.items()}))

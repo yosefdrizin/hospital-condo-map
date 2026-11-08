@@ -36,6 +36,10 @@ the key travels after the # (never sent to the server) and is then remembered in
 The key is `outputs/private/map-key.txt`. It must never go in git, docs/, chat or a commit. Keep the same key across rebuilds, since old blobs stay in git history.
 To add data: put files in the right `data/raw/` folder, run `python pipeline/run_all.py --only 7`, then commit and push `docs/deal-data.bin`. New layers go in `LAYERS` in deal_layer.js.
 Never put that data in `docs/` unencrypted, including data.json, index.html or deal_layer.js.
+The owner is a principal (buys and converts buildings himself): budget under $3M, value-add or leased, buyers not yet chosen.
+Ranking defaults live in `RANK` in 07_targets.py; `rank_parts` (Python) and `score()` in deal_layer.js must stay the same math.
+On the map the owner edits every weight and threshold under "Ranking settings"; his settings live in his browser (localStorage), the workbook shows defaults.
+After changing deal_layer.js, bump `?v=` on its script tag in index.html so browsers load the new version. Phase 1 ranks ring buildings only; phase 2 (outside the rings) needs a countywide NPI pull and a wider CoStar export.
 
 ## Pipeline (pipeline/)
 | Step | File | Does | Writes |
