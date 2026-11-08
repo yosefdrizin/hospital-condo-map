@@ -8,3 +8,4 @@ __pycache__/
 Thumbs.db
 ~$*.xlsx
 outputs/private/
+.claude/settings.local.json
