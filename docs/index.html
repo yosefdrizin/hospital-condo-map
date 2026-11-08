@@ -238,7 +238,7 @@ a{color:var(--green-dk);text-underline-offset:2px}
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="deal_layer.js?v=3" defer></script>
+<script src="deal_layer.js?v=4" defer></script>
 <script>
 (function(){
 const $=s=>document.querySelector(s);
@@ -313,10 +313,12 @@ function init(data){
     if(p.c!=='Y'&&!(p.c==='V'&&!p.o)){lay.on('click',()=>showParcel(p,lay));lay.bindTooltip(esc(p.nm&&p.nm.length<40?title(p.nm):(p.a||USE[p.c][1])),{sticky:true,className:'tip',direction:'top',offset:[0,-6]})}
     parcelGroups[nearestHosp(f[0],f[1])].addLayer(lay)});
   // rings + hospitals
+  // SVG, not canvas: a canvas covers the whole map and would swallow clicks meant for the layers under it
+  const rRings=L.svg({pane:'rings'}),rLabels=L.svg({pane:'labels'});
   D.hospitals.forEach((h,i)=>{
-    ringLayers.push(L.circle([h.lat,h.lon],{radius:MI,pane:'rings',color:ringColor(),weight:mode==='aerial'?2:1.4,dashArray:'7 6',fill:true,fillColor:P['--ink'],fillOpacity:mode==='aerial'?0:.025,interactive:false}).addTo(map));
-    qLayers.push(L.circle([h.lat,h.lon],{radius:MI/4,pane:'rings',color:ringColor(),weight:1.2,dashArray:'2 5',fill:false,interactive:false}).addTo(map));
-    const m=L.circleMarker([h.lat,h.lon],{pane:'labels',radius:8,color:P['--surface'],weight:3,fillColor:P['--ink'],fillOpacity:1}).addTo(map);
+    ringLayers.push(L.circle([h.lat,h.lon],{renderer:rRings,radius:MI,pane:'rings',color:ringColor(),weight:mode==='aerial'?2:1.4,dashArray:'7 6',fill:true,fillColor:P['--ink'],fillOpacity:mode==='aerial'?0:.025,interactive:false}).addTo(map));
+    qLayers.push(L.circle([h.lat,h.lon],{renderer:rRings,radius:MI/4,pane:'rings',color:ringColor(),weight:1.2,dashArray:'2 5',fill:false,interactive:false}).addTo(map));
+    const m=L.circleMarker([h.lat,h.lon],{renderer:rLabels,pane:'labels',radius:8,color:P['--surface'],weight:3,fillColor:P['--ink'],fillOpacity:1}).addTo(map);
     m.bindTooltip(esc(shortName(h.n)),{permanent:true,direction:'right',offset:[10,0],className:'hosp-label perm'});
     m.on('click',()=>selectHosp(i));hospMarkers.push(m)});
   // condos

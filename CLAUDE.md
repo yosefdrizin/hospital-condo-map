@@ -39,7 +39,11 @@ Never put that data in `docs/` unencrypted, including data.json, index.html or d
 The owner is a principal (buys and converts buildings himself): budget under $3M, value-add or leased, buyers not yet chosen.
 Ranking defaults live in `RANK` in 07_targets.py; `rank_parts` (Python) and `score()` in deal_layer.js must stay the same math.
 On the map the owner edits every weight and threshold under "Ranking settings"; his settings live in his browser (localStorage), the workbook shows defaults.
-After changing deal_layer.js, bump `?v=` on its script tag in index.html so browsers load the new version. Phase 1 ranks ring buildings only; phase 2 (outside the rings) needs a countywide NPI pull and a wider CoStar export.
+After changing deal_layer.js, bump `?v=` on its script tag in index.html so browsers load the new version.
+Deal mode flow: ranked worklist first in the panel; a dot or row opens one card (score bars, reasons, status + notes, Street View / DCAD / CoStar
+links, building, price, owner, demand, nearby comps and SBA deals, then "All details"). Status and notes live in this browser (localStorage
+`hcm-notes`); "Export my marked buildings" downloads them as CSV. Keyboard: arrows or j/k step through the list, Esc goes back.
+Layers drawn above the parcels must use an SVG renderer: a canvas in a higher pane covers the whole map and swallows clicks. Phase 1 ranks ring buildings only; phase 2 (outside the rings) needs a countywide NPI pull and a wider CoStar export.
 
 ## Pipeline (pipeline/)
 | Step | File | Does | Writes |
