@@ -238,8 +238,8 @@ a{color:var(--green-dk);text-underline-offset:2px}
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="map_tools.js?v=1" defer></script>
-<script src="deal_layer.js?v=5" defer></script>
+<script src="map_tools.js?v=2" defer></script>
+<script src="deal_layer.js?v=6" defer></script>
 <script>
 (function(){
 const $=s=>document.querySelector(s);
@@ -284,8 +284,11 @@ function condoDim(c){return focus!==null&&!c.near.some(n=>n[0]===D.hospitals[foc
 function condoStyle(c,sel){const s=catOf(c);const A=mode==='aerial';const dm=!sel&&condoDim(c);
   const st=A?{renderer:rCondo,pane:'condos',color:sel?P['--photo-sel']:P['--on-photo'],weight:sel?3.5:2,fillColor:P[s.c],fillOpacity:.62,opacity:1}
             :{renderer:rCondo,pane:'condos',color:sel?P['--ink']:P[s.d],weight:sel?3:1.6,fillColor:P[s.c],fillOpacity:.88,opacity:1};
-  if(dm){st.fillOpacity=.14;st.opacity=.35;st.weight=1}return st}
-function dotStyle(c){const s=catOf(c);const dm=condoDim(c);return {color:P[s.d],fillColor:P[s.c],fillOpacity:dm?.2:.95,opacity:dm?.35:1}}
+  if(dm){st.fillOpacity=.14;st.opacity=.35;st.weight=1}return mtOver(c,st)}
+function dotStyle(c){const s=catOf(c);const dm=condoDim(c);return mtOver(c,{color:P[s.d],fillColor:P[s.c],fillOpacity:dm?.2:.95,opacity:dm?.35:1})}
+// map_tools.js styling and filters ("Style this layer" in the Layers panel) override the built-in colors
+function mtOver(c,st){const o=window.HCM&&HCM.mtStyle&&HCM.mtStyle('condos',c);if(o){if(o.fill)st.fillColor=o.fill;if(o.op!=null){st.fillOpacity*=o.op;st.opacity*=o.op}}return st}
+const mtPass=c=>!(window.HCM&&HCM.mtPass)||HCM.mtPass('condos',c);
 function parcelDim(l){return focus!==null&&l._ctr.distanceTo([D.hospitals[focus].lat,D.hospitals[focus].lon])>MI*1.02}
 function ringColor(){return mode==='aerial'?P['--on-photo']:P['--ink']}
 
@@ -341,7 +344,7 @@ function init(data){
   const mq=matchMedia('(prefers-color-scheme: dark)');mq.addEventListener&&mq.addEventListener('change',restyle);
   new MutationObserver(restyle).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
   window.HCM={map,D,state,esc,fmt,money,title,decode,MI,selectHosp,selectCondo,renderOverview,clearSel,refresh,setMode,getMode:()=>mode,
-    ringLayers,hospMarkers,setLive:v=>{liveBase=v;refresh()}};
+    ringLayers,hospMarkers,setLive:v=>{liveBase=v;refresh()},restyle};
   window.dispatchEvent(new Event('hcm-ready'));
 }
 function shortName(n){return n.replace(' (incl. Zale Lipshy Pavilion)','').replace('Baylor Scott & White Medical Center - Irving','BSW Irving').replace('Texas Health Presbyterian Hospital Dallas','Texas Health Presbyterian').replace('Methodist Richardson - Campbell Rd Campus','Methodist Richardson (Campbell)').replace('UTSW Clements University Hospital','UTSW Clements').replace('Children\'s Medical Center Dallas','Children\'s Dallas').replace('Advanced Dallas Hospital and Clinics','Advanced Dallas').replace(' Hospital','').replace(' Medical Center','')}
@@ -372,7 +375,7 @@ function refresh(){
   const showLabels=$('#l-roads').checked&&(mode==='plan'?z>=15.5:z>=16.25);
   roadLabels.forEach((g,i)=>{const h=D.hospitals[i];const w=showLabels&&vb.intersects(L.latLng(h.lat,h.lon).toBounds(2.4*MI));if(w&&!map.hasLayer(g))g.addTo(map);if(!w&&map.hasLayer(g))map.removeLayer(g)});
   qLayers.forEach(q=>{const w=$('#l-q').checked&&z>=13;if(w&&!map.hasLayer(q))q.addTo(map);if(!w&&map.hasLayer(q))map.removeLayer(q)});
-  D.condos.forEach((c,i)=>{const on=structOn(c);const lay=condoLayers[i],dot=condoDots[i];
+  D.condos.forEach((c,i)=>{const on=structOn(c)&&mtPass(c);const lay=condoLayers[i],dot=condoDots[i];
     if(on&&!map.hasLayer(lay))lay.addTo(map);if(!on&&map.hasLayer(lay))map.removeLayer(lay);
     const dw=on&&z<14.5;if(dw&&!map.hasLayer(dot))dot.addTo(map);if(!dw&&map.hasLayer(dot))map.removeLayer(dot)});
   autoFocus(z);

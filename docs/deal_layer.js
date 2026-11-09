@@ -129,6 +129,12 @@ function start(data){P=data;
     if(l.k!=='cand')l.marks.forEach(m=>l.group.addLayer(m));
     if(l.on)l.group.addTo(map)});
   rescore();pcts();applyFilter();sizeDots();map.on('zoomend',sizeDots);
+  // hand each layer to map_tools.js so it can be styled, filtered and shown in the data table
+  const reg=()=>LAYERS.forEach(l=>{if(!P.layers[l.k])return;H.registerLayer({id:l.k,label:l.label,color:l.color,
+    features:P.layers[l.k].map(it=>({raw:it,props:it.f,lat:it.lat,lon:it.lon})),
+    isOn:()=>map.hasLayer(l.group),
+    apply:()=>{l.k==='cand'?applyFilter():applyOther(l)},restyle:sizeDots,open:it=>open(it,{fly:true})})});
+  if(H.registerLayer)reg();else window.addEventListener('mt-ready',reg,{once:true});
   box.querySelectorAll('#p-rank input').forEach(inp=>inp.addEventListener('input',()=>{const v=parseFloat(inp.value);if(isFinite(v)){R[inp.dataset.g][inp.dataset.k]=v;rerank()}}));
   $('#p-reset').addEventListener('click',()=>{try{localStorage.removeItem(RKEY)}catch(e){}loadR();box.querySelectorAll('#p-rank input').forEach(inp=>inp.value=R[inp.dataset.g][inp.dataset.k]);rerank()});
   box.querySelectorAll('[data-l]').forEach(c=>c.addEventListener('change',()=>{const l=LAYERS.find(x=>x.k===c.dataset.l);c.checked?l.group.addTo(map):map.removeLayer(l.group)}));
@@ -150,18 +156,23 @@ function tip(l,it){const {esc}=H,f=it.f;
   if(l.k!=='cand')return `<b>${esc(l.name(f))}</b><br>${esc(l.sub(f))}`;
   const s=STATUS.find(x=>x[0]===stat(it));
   return `<b>${f['Rank']?'#'+f['Rank']+' · ':''}${esc(f['Address'])}</b><br>Score ${f['Score']} · ${esc(f['Use'])} · ${num(f['Bldg SF'])} SF${s&&s[0]?` · <span style="color:${s[2]}">${s[1]}</span>`:''}`}
-function styleCand(it){const m=it._m;if(!m)return;const s=stat(it),z=H.map.getZoom();
-  m.setStyle({fillColor:tierColor(it),color:s?SCOL[s]:'#fff',weight:s?(z<12?2:3):(z<12?.6:1.2),fillOpacity:s==='pass'?.3:.92})}
+// styles and filters set in map_tools.js ("Style" / "Filter" in the Layers panel) take precedence over the defaults here
+const mt=(k,it)=>H.mtStyle?H.mtStyle(k,it):null;
+const mtp=(k,it)=>!H.mtPass||H.mtPass(k,it);
+function styleCand(it){const m=it._m;if(!m)return;const s=stat(it),z=H.map.getZoom(),o=mt('cand',it)||{};
+  m.setStyle({fillColor:o.fill||tierColor(it),color:s?SCOL[s]:'#fff',weight:s?(z<12?2:3):(z<12?.6:1.2),fillOpacity:(s==='pass'?.3:.92)*(o.op??1),opacity:o.op??1})}
 // readable at every zoom: top tiers stay visible when zoomed out, the rest shrink
 function sizeDots(){const z=H.map.getZoom();LAYERS.forEach(l=>(l.marks||[]).forEach(m=>{
-  const t=m._it._t,lo=z<12,mid=z<13.5;
+  const t=m._it._t,lo=z<12,mid=z<13.5,o=mt(l.k,m._it)||{};
   const r=l.k!=='cand'?(lo?3:mid?4:m._r):lo?(t===1?5:t===2?3.5:2.2):mid?Math.max(3.5,m._r*.7):m._r;
-  m.setRadius(r)}));P.layers.cand.forEach(styleCand)}
+  m.setRadius(o.r!=null?o.r*(lo?.6:mid?.8:1):r);
+  if(l.k!=='cand')m.setStyle({fillColor:o.fill||l.color,fillOpacity:.92*(o.op??1),opacity:o.op??1})}));P.layers.cand.forEach(styleCand)}
+function applyOther(l){l.group.clearLayers();l.marks.filter(m=>mtp(l.k,m._it)).forEach(m=>l.group.addLayer(m))}
 
 // ---------- filters and the ranked worklist ----------
 function passes(it){const f=it.f,[lo,hi]=SIZE[filt.size],s=stat(it);
   if(filt.status==='active'&&s==='pass')return false;if(filt.status==='short'&&s!=='short')return false;if(filt.status==='any'&&!s&&!(NOTES[pid(it)]||{}).n)return false;
-  return f['Bldg SF']>=lo&&f['Bldg SF']<hi&&(!filt.sale||f['CoStar For Sale']==='Y')&&(!filt.med||f['Use']==='Medical office')&&(!filt.prov||f['Practice Locations in Bldg']>0)&&(filt.over||!!f['Rank'])}
+  return f['Bldg SF']>=lo&&f['Bldg SF']<hi&&(!filt.sale||f['CoStar For Sale']==='Y')&&(!filt.med||f['Use']==='Medical office')&&(!filt.prov||f['Practice Locations in Bldg']>0)&&(filt.over||!!f['Rank'])&&mtp('cand',it)}
 function applyFilter(){const l=LAYERS[0];l.group.clearLayers();
   list=P.layers.cand.filter(passes).sort((a,b)=>(a.f['Rank']||1e9)-(b.f['Rank']||1e9)||b._sc-a._sc);
   list.forEach(it=>l.group.addLayer(it._m));shown=30;onView(true)}
