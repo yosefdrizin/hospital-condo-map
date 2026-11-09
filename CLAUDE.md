@@ -91,6 +91,11 @@ Single file, Leaflet 1.9.4 from cdnjs. Loads `data.json` and `basemap.json`. Fea
 ownership vs structure coloring, map-driven hospital focus (center inside a ring at zoom 13.5+ switches the panel;
 others dim; zoom below 13 returns to all), overlap switcher chips, Supply and demand numbers sheet (sortable).
 Data field names in data.json are short on purpose (see 05_build_site.py for the meaning of each key).
+`docs/map_tools.js` (public, no data) adds Felt-style tools: basemap menu (live USGS satellite / satellite+labels, sharp NAIP snapshots,
+OpenStreetMap streets, USGS topo, plan), search (hospitals, condos, parcels, deal data via `HCM.searchProviders`, addresses via Nominatim),
+measure distance / area / radius, and a Layers panel that mirrors the page's own checkboxes. Live NAIP tiles are too slow (over 60 s a tile), so
+close-ups near hospitals still use the stitched NAIP snapshots. Roadmap the owner chose: (1) look and navigation [done], then styling and filters,
+own data and drawing, dashboards and presenting. Bump `?v=` on map_tools.js after changes.
 Some source labels in the page footer are hard-coded (DCAD roll date, TIGER year); update them after a data refresh.
 
 ## Gotchas

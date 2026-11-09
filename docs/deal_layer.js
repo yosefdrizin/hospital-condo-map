@@ -137,6 +137,13 @@ function start(data){P=data;
   [['p-sale','sale'],['p-med','med'],['p-prov','prov'],['p-over','over']].forEach(([id,k])=>$('#'+id).addEventListener('change',e=>{filt[k]=e.target.checked;applyFilter()}));
   $('#p-sheet').addEventListener('click',openSheet);$('#p-csv').addEventListener('click',exportCSV);
   document.addEventListener('keydown',onKey);
+  // the map's search box (map_tools.js) also finds deal buildings, owners and SBA borrowers
+  H.searchProviders=H.searchProviders||[];
+  H.searchProviders.push(q=>{const n=q.toUpperCase().trim();if(n.length<3)return [];const out=[];
+    for(const l of LAYERS)for(const it of P.layers[l.k]||[]){if(out.length>=8)break;const f=it.f;
+      const hay=[f['Address'],f['Owner'],f['Owner 2'],f['Property Name'],f['CoStar True Owner'],f['CoStar Name'],f['Borrower'],f['Borrower Address']].filter(Boolean).join(' ').toUpperCase();
+      if(hay.includes(n))out.push({kind:l.label+(f['Rank']?` · #${f['Rank']}`:''),label:l.name(f),sub:l.sub(f),lat:it.lat,lon:it.lon,go:()=>open(it,{fly:true})})}
+    return out});
   new MutationObserver(onView).observe($('#view'),{childList:true});onView();
 }
 function tip(l,it){const {esc}=H,f=it.f;

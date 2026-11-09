@@ -238,7 +238,8 @@ a{color:var(--green-dk);text-underline-offset:2px}
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="deal_layer.js?v=4" defer></script>
+<script src="map_tools.js?v=1" defer></script>
+<script src="deal_layer.js?v=5" defer></script>
 <script>
 (function(){
 const $=s=>document.querySelector(s);
@@ -339,7 +340,9 @@ function init(data){
   fitAll();renderOverview();refresh();
   const mq=matchMedia('(prefers-color-scheme: dark)');mq.addEventListener&&mq.addEventListener('change',restyle);
   new MutationObserver(restyle).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
-  window.HCM={map,D,state,esc,fmt,money,title,decode,MI,selectHosp,renderOverview,clearSel,refresh};window.dispatchEvent(new Event('hcm-ready'));
+  window.HCM={map,D,state,esc,fmt,money,title,decode,MI,selectHosp,selectCondo,renderOverview,clearSel,refresh,setMode,getMode:()=>mode,
+    ringLayers,hospMarkers,setLive:v=>{liveBase=v;refresh()}};
+  window.dispatchEvent(new Event('hcm-ready'));
 }
 function shortName(n){return n.replace(' (incl. Zale Lipshy Pavilion)','').replace('Baylor Scott & White Medical Center - Irving','BSW Irving').replace('Texas Health Presbyterian Hospital Dallas','Texas Health Presbyterian').replace('Methodist Richardson - Campbell Rd Campus','Methodist Richardson (Campbell)').replace('UTSW Clements University Hospital','UTSW Clements').replace('Children\'s Medical Center Dallas','Children\'s Dallas').replace('Advanced Dallas Hospital and Clinics','Advanced Dallas').replace(' Hospital','').replace(' Medical Center','')}
 // Fitting into a 0-size box (hidden or still-opening pane) jumps to maxZoom, so wait for a real size.
@@ -389,13 +392,14 @@ function buildBase(){if(!BM)return;
   baseOv=[mk(BM.ov12),mk(BM.ov)];
   baseHosp=BM.hosp.map(h=>({b:L.latLngBounds(h.z16.b),z15:mk(h.z15),z16:mk(h.z16),naip:mk(h.naip)}));
 }
+let liveBase=false;   // map_tools.js sets this when a live tile basemap is showing: skip the county snapshots, keep close-up NAIP
 function updateBase(z){
   const on=mode==='aerial'&&!!BM;
-  baseOv.forEach(o=>{if(on&&!map.hasLayer(o))o.addTo(map);if(!on&&map.hasLayer(o))map.removeLayer(o)});
+  baseOv.forEach(o=>{const w=on&&!liveBase;if(w&&!map.hasLayer(o))o.addTo(map);if(!w&&map.hasLayer(o))map.removeLayer(o)});
   const vb=map.getBounds(),c=map.getCenter();
   const vis=baseHosp.map(h=>({h,d:h.b.getCenter().distanceTo(c)})).filter(x=>x.h.b.intersects(vb)).sort((a,b)=>b.d-a.d);
   const want=new Set();
-  if(on){const lvl=z<12.5?null:z<15?'z15':z<16.25?'z16':'naip';
+  if(on){const lvl=z<12.5?null:liveBase&&z<16.25?null:z<15?'z15':z<16.25?'z16':'naip';
     if(lvl)vis.slice(-3).forEach(x=>want.add(x.h[lvl]))}
   baseHosp.forEach(h=>['z15','z16','naip'].forEach(k=>{const o=h[k];if(want.has(o)){if(!map.hasLayer(o))o.addTo(map)}else if(map.hasLayer(o))map.removeLayer(o)}));
   vis.forEach(x=>['z15','z16','naip'].forEach(k=>{if(map.hasLayer(x.h[k]))x.h[k].bringToFront()}));
