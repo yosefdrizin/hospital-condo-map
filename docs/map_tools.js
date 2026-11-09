@@ -43,6 +43,10 @@ function boot(){H=window.HCM;map=H.map;H.searchProviders=H.searchProviders||[];
     features:H.D.condos.map(c=>{const ll=decodeFirst(c.g);return {raw:c,lat:ll[0],lon:ll[1],props:{'Condo Project':H.title(c.p),'Address':c.a,'City':c.city,'Ownership':OWN[c.oc],
       'Structure':c.s,'Primary Use':c.u,'Suites':c.cu,'Medical Suites':c.mu,'Hospital-owned Suites':c.ho,'Independent Medical Suites':c.imu,'Indep. Medical Sold Last 3 Yrs':c.irec,
       'Building SF':c.sf,'Earliest Yr Built':c.y,'Distinct Owners':c.ow,'Largest Owner':c.lo,'DCAD Value':c.val,'Latest Deed':c.deed,'Nearest Hospital':c.near[0]&&c.near[0][0]}}})});
+  // shared with map_data.js (uploads, drawing, views)
+  H.unregisterLayer=id=>{const d=BY[id];if(!d)return;if(d._ov)map.removeLayer(d._ov);if(d._lab)map.removeLayer(d._lab);REG.splice(REG.indexOf(d),1);delete BY[id];delete ST[id];saveST();renderLegend();
+    const t=$('#mt-table');if(t&&t.dataset.id===id)t.remove();const e=$('#mt-edit');if(e&&e.dataset.id===id)e.remove()};
+  H.mt={openEditor,openTable,renderLegend,closeMenus,setBase,getBase:()=>base.k,refreshLayer:id=>BY[id]&&applyAll(BY[id],true)};
   window.dispatchEvent(new Event('mt-ready'));
   map.on('moveend',()=>REG.forEach(drawLabels));
   $('#mt-table-btn').addEventListener('click',()=>{if($('#mt-table')){$('#mt-table').remove();return}openTable((BY.cand||BY.condos).id)});

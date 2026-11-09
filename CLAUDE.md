@@ -95,12 +95,17 @@ Data field names in data.json are short on purpose (see 05_build_site.py for the
 OpenStreetMap streets, USGS topo, plan), search (hospitals, condos, parcels, deal data via `HCM.searchProviders`, addresses via Nominatim),
 measure distance / area / radius, and a Layers panel that mirrors the page's own checkboxes. Live NAIP tiles are too slow (over 60 s a tile), so
 close-ups near hospitals still use the stitched NAIP snapshots. Roadmap the owner chose: (1) look and navigation [done], (2) styling and filters
-[done], then own data and drawing, dashboards and presenting. Bump `?v=` on map_tools.js after changes.
+[done], (3) own data and drawing [done], then dashboards and presenting. Bump `?v=` on map_tools.js after changes.
 Phase 2: layers register with `HCM.registerLayer({id,label,color,features:[{raw,props,lat,lon}],isOn,apply,restyle,open})` (deal_layer.js registers its
 six; map_tools registers the public condo projects). Per layer: style (points colored by category or number, size by number on the 5th to 95th
 percentile, opacity; heatmap via leaflet.heat 0.2.0 from cdnjs; hex bins), filters (number range, category checkboxes, text), labels, auto legend,
 data table (sort, search, columns, CSV). Settings live in localStorage `hcm-mt`. Layer owners honor them through `HCM.mtStyle(id,raw)` and
 `HCM.mtPass(id,raw)`; filters also narrow the deal worklist, while "hide the points" only makes dots invisible.
+Phase 3 is `docs/map_data.js` (public, no data): Add data (drag or pick CSV / Excel / GeoJSON / KML; lat/long columns, else addresses looked up
+via Census JSONP then Nominatim, 1,000-row cap, cached), stored in IndexedDB `hcm` and registered as styleable layers; Draw with Leaflet-Geoman
+2.17.0 from jsdelivr (attached by hand with `new L.PM.Map(map)` since the map exists first), drawings in localStorage `hcm-draw`; Views
+(`hcm-views`) and a backup file of every `hcm-*` setting plus IndexedDB data, never `hcm-key`. Its popovers use `.md-pop`, not `.mt-pop`
+(map_tools closes `.mt-pop` on outside clicks). autoFocus in index.html leaves an open deal card alone.
 Some source labels in the page footer are hard-coded (DCAD roll date, TIGER year); update them after a data refresh.
 
 ## Gotchas
