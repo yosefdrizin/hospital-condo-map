@@ -270,7 +270,7 @@ def score_candidates(b, costar_row, geo, sba_pts):
         return c.reindex(b.index, fill_value=0)
 
     pv = pd.read_csv(PROC / "npi_providers_near.csv", dtype=str)
-    pv = pv[(pv.hs_bldg == "False") & pv.grp.isin(["ph", "dn", "ot"])]
+    pv = pv[(pv.indep == "True") & pv.grp.isin(["ph", "dn", "ot"])]
     pvg = gpd.GeoDataFrame(pv[["ploc"]], geometry=gpd.points_from_xy(pd.to_numeric(pv.lon), pd.to_numeric(pv.lat)), crs=4326).to_crs(CRS_FT)
     sp = pd.DataFrame(sba_pts, columns=["lat", "lon"]).dropna() if sba_pts else pd.DataFrame(columns=["lat", "lon"])
     sg = gpd.GeoDataFrame(geometry=gpd.points_from_xy(sp.lon, sp.lat), crs=4326).to_crs(CRS_FT)

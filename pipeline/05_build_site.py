@@ -204,7 +204,7 @@ def main():
     sm = lambda k: sum(c.get(k, 0) for c in condos)  # noqa: E731
     totals = {"u": sm("cu"), "mu": sm("mu"), "ho": sm("ho"), "ind": sm("ind"), "imu": sm("imu"), "irec": sm("irec"), **npi.get("tot", {})}
     data = {"hospitals": hosp, "condos": condos, "parcels": parcels_out, "roads": roads, "totals": totals,
-            "asof": f"DCAD {SETTINGS['dcad_year']} roll", "npiAsOf": npi.get("as_of", ""), "recentCutoff": cutoff,
+            "asof": f"DCAD {SETTINGS['dcad_year']} roll", "npiAsOf": npi.get("as_of", ""), "cmsAsOf": npi.get("cms_as_of") or "", "recentCutoff": cutoff,
             "built": date.today().isoformat()}
     (DOCS / "data.json").write_text(json.dumps(data, separators=(",", ":")))
     log(f"totals: {totals}")

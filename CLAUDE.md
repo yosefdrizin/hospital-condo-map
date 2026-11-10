@@ -70,6 +70,11 @@ Hospitals are in `config/hospitals.csv` (name, system, address, beds, lat/lon, n
   "Independent" = P + I. Richardson Medical Center = Methodist Richardson's former name, counted as hospital.
 - **Building ownership for physicians**: a practice address is "hospital-owned building" if its DCAD parcel is hospital class,
   owned by a hospital/health system/UT System/VA, or contains a hospital point. Investor-owned MOBs on campus count as independent.
+- **Hospital-employed (CMS group)**: a provider whose Medicare group at that ZIP (CMS Doctors & Clinicians file, `data/raw/cms/dac_dfw.csv`)
+  matches `SYSTEM_GROUP_RE` in 03_npi.py (UTSW, HealthTexas/Baylor Scott & White, Texas Health Physicians Group, MedHealth/Methodist,
+  Parkland, Children's, Medical City/HCA, hospital districts). "Independent" provider = independent building AND not hospital-employed
+  (`indep` column; `phSys` = physicians moved by the group rule). No CMS record (about 41% of nearby physicians, most dentists) = building rule only.
+  Big corporate groups (US Anesthesia Partners, Texas Oncology, WellMed/Optum) are not hospital systems and stay independent.
 - **Physicians**: NPI-1 records with primary taxonomy starting `20` (MD/DO). "All clinicians" = every individual NPI record.
 - **Dentists / other outpatient**: taxonomy groups in `common.PROVIDER_GROUPS` (dentists 1223*; other outpatient = chiro, PT, OT,
   optometry, podiatry, psychology, counseling, clinical social work, MFT, audiology, speech). NPs/PAs are in All clinicians only.
@@ -81,9 +86,9 @@ Hospitals are in `config/hospitals.csv` (name, system, address, beds, lat/lon, n
 
 ## Current numbers (built 2026-11-02 from the DCAD 2026 roll posted 10/12/2026)
 300 condo suites within 1 mile of the 15 hospitals; 135 medical; 40 hospital-owned; 106 independent medical;
-9 independent medical suites sold in the last 3 years. Within 1 mile (NPI pulled 2026-11-02), independent buildings:
-1,738 physicians, 407 dentists, 1,962 other outpatient, 1,499 practice locations; hospital-owned buildings: 6,179 physicians,
-334 dentists, 1,342 other outpatient; 23,552 individual clinicians. Private workbook: 1,545 conversion candidates.
+9 independent medical suites sold in the last 3 years. Within 1 mile (NPI pulled 2026-11-02, CMS group file 10/2/2026), independent:
+1,582 physicians, 406 dentists, 1,950 other outpatient, 1,462 practice locations; hospital-owned building or hospital-employed: 6,335 physicians,
+335 dentists, 1,354 other outpatient; 23,553 individual clinicians. (Before the CMS group rule, 11/9/2026: 1,738 independent physicians.) Private workbook: 1,545 conversion candidates.
 If a rebuild changes these, say so.
 
 ## The page (docs/index.html)
@@ -117,6 +122,8 @@ Some source labels in the page footer are hard-coded (DCAD roll date, TIGER year
 
 ## Gotchas
 - DCAD downloads go through `ViewPDFs.aspx?type=3&id=\\DCAD.ORG\...` URLs (encoded in common.py).
+- CMS Doctors & Clinicians file: the filtered query API returns 403 to scripts, so step 3 streams the full ~900 MB CSV once (about 1 minute)
+  and keeps Texas 75xxx/76xxx rows in `data/raw/cms/dac_dfw.csv`. Delete it (or use --refresh) to pull a newer month.
 - NPI Registry API: max 200 per page, `skip` caps at 1000, so 1,200 records per query. Big ZIPs are split by last-name prefix.
   The bulk NPPES file was down for maintenance in Nov 2026; the API is the fallback that works.
 - USGS Imagery Topo tiles exist only through zoom 16; closer views use NAIP via exportImage (2000 px chunks; 4000 px fails).

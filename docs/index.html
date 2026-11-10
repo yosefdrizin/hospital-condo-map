@@ -416,8 +416,8 @@ function setScheme(v){if(v===scheme)return;scheme=v;try{localStorage.setItem('hc
 function rerender(){if(state.view==='overview')renderOverview();else if(state.view==='hosp')selectHosp(state.hosp,true,!!state.auto);else if(state.view==='condo'){const i=state.condo,f=state.hosp;state.view='hosp';state.hosp=f;selectCondo(i,true)}}
 // One place for every number's label and exact definition: p = panel label, t = table header, d = definition (info button + table notes)
 const OTH='chiropractic, physical and occupational therapy, optometry, podiatry, psychology, counseling, clinical social work, marriage and family therapy, audiology, speech';
-const INDB='a building not owned by a hospital or health system (investor-owned MOBs on a campus count here)';
-const HOSB='a hospital campus building, or a building titled to a hospital, health system, UT System or the VA';
+const INDB='a building not owned by a hospital or health system (investor-owned MOBs on a campus count here), and the provider does not bill Medicare through a hospital system\'s medical group (CMS Doctors and Clinicians file)';
+const HOSB='a hospital campus building or a building titled to a hospital, health system, UT System or the VA; or any building when the provider bills Medicare through a hospital system\'s medical group (UTSW, Baylor Scott & White, Texas Health, Methodist, Parkland, Children\'s, Medical City)';
 const DEF={
  u:{p:'Condo suites, all uses',t:'Condo suites, all uses',d:'Commercial condo suites (each its own DCAD account, sellable on its own) in a condo project whose parcel is within 1 mile of the hospital campus point. Office, medical, flex, retail and industrial. Parking, land, apartment and hotel units are not counted.'},
  mu:{p:'Medical suites',t:'Medical suites',d:'Condo suites DCAD classes as Medical Office Building or Urgent Care Clinic. This is the building type, not who occupies the suite today.'},
@@ -430,7 +430,7 @@ const DEF={
  phOff:{p:'Physicians (MD/DO)',t:'Physicians (MD/DO)',d:`Individual providers with a physician (MD or DO) specialty whose registered practice address is within 1 mile and in ${INDB}. Each person counts once.`},
  dnOff:{p:'Dentists',t:'Dentists',d:`Individual dentists (all dental specialties) whose registered practice address is within 1 mile and in ${INDB}.`},
  otOff:{p:'Other outpatient providers',t:'Other outpatient',d:`Individual providers in ${OTH}, whose registered practice address is within 1 mile and in ${INDB}.`},
- pxOff:{p:'Practice locations',t:'Practice locations',d:'Distinct building + suite addresses among the physicians, dentists and other outpatient providers in independent buildings. Several providers sharing one suite count once, so this approximates the number of separate practices. Approximate: many registry addresses leave out the suite, which undercounts.'},
+ pxOff:{p:'Practice locations',t:'Practice locations',d:'Distinct building + suite addresses among the independent physicians, dentists and other outpatient providers (independent building and not billing through a hospital system medical group). Several providers sharing one suite count once, so this approximates the number of separate practices. Approximate: many registry addresses leave out the suite, which undercounts.'},
  phOn:{p:'Physicians (MD/DO)',t:'Physicians (MD/DO)',d:`Physicians (MD or DO) whose registered practice address is within 1 mile and in ${HOSB}.`},
  dnOn:{p:'Dentists',t:'Dentists',d:`Dentists whose registered practice address is within 1 mile and in ${HOSB}.`},
  otOn:{p:'Other outpatient providers',t:'Other outpatient',d:`Providers in ${OTH}, whose registered practice address is within 1 mile and in ${HOSB}.`},
@@ -440,7 +440,7 @@ const NCOLS=[
  {k:'u',g:1,sep:1},{k:'mu',g:1},{k:'ho',g:1},{k:'ind',g:1},{k:'imu',g:1},{k:'irec',g:1},
  {k:'phOff',g:2,sep:1},{k:'dnOff',g:2},{k:'otOff',g:2},{k:'pxOff',g:2},
  {k:'phOn',g:3,sep:1},{k:'dnOn',g:3},{k:'otOn',g:3},{k:'cl',g:4,sep:1}].map(c=>DEF[c.k]?{...c,l:DEF[c.k].t,d:DEF[c.k].d}:c);
-const NGROUPS=[['',2],['Supply · condo suites within 1 mile',6],['Demand · providers in independent buildings',4],['Demand · providers in hospital-owned buildings',3],['Everyone',1]];
+const NGROUPS=[['',2],['Supply · condo suites within 1 mile',6],['Demand · independent providers',4],['Demand · hospital-owned building or hospital-employed',3],['Everyone',1]];
 let nsort={k:'b',d:-1};
 function openNumbers(){$('#sheet').hidden=false;renderNumbers();setTimeout(()=>{const x=$('#closeSheet');x&&x.focus()},0)}
 function closeNumbers(){$('#sheet').hidden=true;const b=$('#openNum');b&&b.focus()}
@@ -454,7 +454,7 @@ function renderNumbers(){
   <p class="sub" style="margin-top:14px"><b>How to read it:</b> supply columns count <b>suites</b>; demand columns count <b>people</b>, one per provider, placed by their registered practice address. Hover a column header for its definition.</p>
   <div class="defs">
    ${NGROUPS.slice(1).map(([gl],gi)=>`<div><b class="gl">${gl}</b>${NCOLS.filter(c=>c.g===gi+1).map(c=>`<p><b>${esc(c.l)}:</b> ${esc(c.d)}</p>`).join('')}</div>`).join('')}
-   <div><b>Sources:</b> DCAD 2026 roll (posted 10/12/2026); CMS NPI Registry, pulled ${esc(D.npiAsOf||'Nov 2026')}; Census geocoder. NPI addresses are self-reported and can be out of date. Existing stock only, not current listings.</div>
+   <div><b>Sources:</b> DCAD 2026 roll (posted 10/12/2026); CMS NPI Registry, pulled ${esc(D.npiAsOf||'Nov 2026')}; CMS Doctors and Clinicians file (Medicare group affiliation), ${esc(D.cmsAsOf||'Oct 2026')}; Census geocoder. NPI addresses are self-reported and can be out of date. Existing stock only, not current listings.</div>
   </div>`;
   $('#closeSheet').addEventListener('click',closeNumbers);
   document.querySelectorAll('.ntbl th[data-k]').forEach(th=>th.addEventListener('click',()=>{const k=th.dataset.k;nsort=nsort.k===k?{k,d:-nsort.d}:{k,d:k==='n'?1:-1};renderNumbers()}));
@@ -486,7 +486,7 @@ function clearSel(){if(state.condo!=null){condoLayers[state.condo].setStyle(cond
 function renderOverview(){state.view='overview';setFocus(null);
   const hs=D.hospitals.map((h,i)=>({...h,i})).sort((a,b)=>b.b-a.b);const max=Math.max(...hs.map(h=>h.u),1);
   setView(`<button class="btn-num" id="openNum">Supply and demand numbers<small>All 15 hospitals in one table →</small></button>
-  <div class="list" style="margin-top:16px"><div class="list-head"><span>Hospital, by beds</span><span>Condo suites</span></div>${hs.map(h=>`<button class="row" data-h="${h.i}"><span class="row-name">${esc(h.n)}</span><span class="row-num">${h.u}<small>${h.mu} medical</small></span><span class="row-meta">${fmt(h.b)} beds · ${h.ho} hospital-owned · ${h.imu} independent medical${h.phOff!=null?` · ${fmt(h.phOff)} physicians in independent buildings`:''}</span><span class="bar"><i style="width:${h.u/max*100}%"></i></span></button>`).join('')}</div>`);
+  <div class="list" style="margin-top:16px"><div class="list-head"><span>Hospital, by beds</span><span>Condo suites</span></div>${hs.map(h=>`<button class="row" data-h="${h.i}"><span class="row-name">${esc(h.n)}</span><span class="row-num">${h.u}<small>${h.mu} medical</small></span><span class="row-meta">${fmt(h.b)} beds · ${h.ho} hospital-owned · ${h.imu} independent medical${h.phOff!=null?` · ${fmt(h.phOff)} independent physicians`:''}</span><span class="bar"><i style="width:${h.u/max*100}%"></i></span></button>`).join('')}</div>`);
   $('#openNum').addEventListener('click',openNumbers);
   document.querySelectorAll('[data-h]').forEach(b=>b.addEventListener('click',()=>selectHosp(+b.dataset.h)));
 }
@@ -501,8 +501,8 @@ function selectHosp(i,keepMap,auto){clearSel();state.view='hosp';state.hosp=i;st
   <dl class="facts" style="margin-top:14px"><h5>Supply · condo suites within 1 mile</h5><p class="fnote">Counts suites, from the DCAD ${esc(D.asof.replace('DCAD ',''))}.</p>
   ${['u','mu','ho','ind','imu','irec','pj'].map(k=>fact(k,h[k])).join('')}${fact('near',h.near==null?'none':h.near.toFixed(2)+' mi',1)}
   <h5>Demand · providers practicing within 1 mile</h5><p class="fnote">Counts people, one per provider, by registered practice address (CMS NPI Registry, pulled ${esc(D.npiAsOf||'')}).</p>
-  <h6>In independent buildings</h6>${['phOff','dnOff','otOff','pxOff'].map(k=>fact(k,h[k])).join('')}
-  <h6>In hospital-owned buildings</h6>${['phOn','dnOn','otOn'].map(k=>fact(k,h[k])).join('')}
+  <h6>Independent (building and group)</h6>${['phOff','dnOff','otOff','pxOff'].map(k=>fact(k,h[k])).join('')}
+  <h6>Hospital-owned building or hospital-employed</h6>${['phOn','dnOn','otOn'].map(k=>fact(k,h[k])).join('')}
   <h6>Everyone</h6>${fact('cl',h.cl)}</dl>
   ${h.note?`<p class="note" style="margin-top:12px">${esc(h.note)}</p>`:''}
   <div class="list" style="margin-top:16px"><div class="list-head"><span>Condo buildings by distance</span><span>Suites</span></div>

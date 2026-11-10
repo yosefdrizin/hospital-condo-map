@@ -5,7 +5,9 @@
    large ZIPs are split by two-letter last-name prefix (recursively).
 2. Geocode unique practice addresses with the Census batch geocoder; fall back to DCAD address match.
 3. Match each address to its DCAD parcel and flag hospital / health-system-owned buildings.
-4. Count per hospital within the radius, in independent vs hospital-owned buildings: physicians (MD/DO),
+   Join the CMS Doctors & Clinicians file (Medicare group affiliation): providers billing through a
+   health-system medical group at that ZIP count on the hospital side even in an independent building.
+4. Count per hospital within the radius, independent vs hospital side: physicians (MD/DO),
    dentists and other outpatient (groups in common.PROVIDER_GROUPS); practice locations (building + suite) in
    independent buildings; and all individual clinicians.
 
@@ -114,6 +116,77 @@ def ring_zips(parcels, hg, ai):
     return zips
 
 
+# ---------------- CMS Doctors & Clinicians (group affiliation) ----------------
+CMS_DIR = RAW / "cms"
+CMS_FILE = CMS_DIR / "dac_dfw.csv"
+CMS_META = "https://data.cms.gov/provider-data/api/1/metastore/schemas/dataset/items/mj5m-pzi6"
+# health-system medical groups (physician arms of the hospital owners); tuned against the 10/2026 file
+# Not included on purpose: big independent or corporate groups (US Anesthesia Partners, Texas Oncology, WellMed/Optum,
+# hospitalist companies, Methodist-CDI imaging JV) and look-alikes such as TEXAS HEALTH CARE PLLC.
+SYSTEM_GROUP_RE = (r"UNIVERSITY OF TEXAS SOUTHWESTERN|UT SOUTHWESTERN|HEALTHTEXAS PROVIDER NETWORK|SCOTT AND WHITE|"
+                   r"BAYLOR SCOTT|BAYLOR UNIVERSITY MEDICAL|BAYLOR ST\. LUKE|TEXAS HEALTH PHYSICIANS GROUP|"
+                   r"TEXAS HEALTH RESOURCES|TEXAS HEALTH URGENT CARE|TEXAS HEALTH VIRTUAL CARE|HOSPITAL DISTRICT|PARKLAND|"
+                   r"^MEDHEALTH\b|METHODIST MEDICAL GROUP|METHODIST HEALTH SYSTEM|DALLAS PHYSICIAN MEDICAL SERVICES FOR CHILDREN|"
+                   r"CHILDREN'?S HEALTH|CHILDRENS MEDICAL CENTER|COOK CHILDRENS|^MEDICAL CITY|\bHCA\b|CHRISTUS|"
+                   r"TEXAS SCOTTISH RITE|VETERANS AFFAIRS|UNIVERSITY OF TEXAS HEALTH SCIENCE|"
+                   r"UNIVERSITY OF NORTH TEXAS HEALTH SCIENCE")
+CMS_COLS = ["NPI", "Facility Name", "org_pac_id", "num_org_mem", "adr_ln_1", "City/Town", "State", "ZIP Code", "pri_spec"]
+
+
+def cms_download(refresh=False):
+    """Stream the CMS National Downloadable File (about 900 MB) and keep only Texas 75xxx/76xxx rows.
+    CMS blocks scripted use of its filtered query API, so the whole file is read once; only the
+    North Texas rows (a few MB) are saved."""
+    if CMS_FILE.exists() and not refresh:
+        return
+    CMS_DIR.mkdir(parents=True, exist_ok=True)
+    meta = requests.get(CMS_META, timeout=60).json()
+    url = next(d["downloadURL"] for d in meta["distribution"] if d.get("downloadURL", "").lower().endswith(".csv"))
+    log(f"CMS clinician file ({meta.get('modified')}): streaming about 900 MB, keeping North Texas rows")
+    tmp = CMS_FILE.with_suffix(".tmp")
+    n = kept = 0
+    with requests.get(url, stream=True, timeout=600) as r, open(tmp, "w", newline="", encoding="utf-8") as out:
+        r.raise_for_status()
+        lines = (l.decode("utf-8", "replace") for l in r.iter_lines())
+        rd = csv.reader(lines)
+        head = next(rd)
+        idx = [head.index(c) for c in CMS_COLS]
+        st, zp = head.index("State"), head.index("ZIP Code")
+        w = csv.writer(out)
+        w.writerow(CMS_COLS + ["cms_as_of"])
+        for row in rd:
+            n += 1
+            if len(row) > zp and row[st] == "TX" and row[zp][:2] in ("75", "76"):
+                w.writerow([row[i] for i in idx] + [meta.get("modified", "")])
+                kept += 1
+            if n % 500000 == 0:
+                log(f"  {n:,} rows read, {kept:,} kept")
+    tmp.replace(CMS_FILE)
+    log(f"CMS: {kept:,} North Texas rows of {n:,}")
+
+
+def cms_affiliation(prov):
+    """prov: DataFrame with npi, zip (practice ZIP from NPPES). Returns one row per npi with
+    cms_match, cms_group, cms_group_size, sys_emp, cms_as_of.
+    A provider is system-employed when the CMS group billed at the same ZIP is a health-system medical
+    group (SYSTEM_GROUP_RE). With no row at that ZIP, all of the provider's North Texas groups must be
+    health-system groups. No CMS record (common for dentists and non-Medicare providers): not flagged."""
+    cms = pd.read_csv(CMS_FILE, dtype=str).rename(columns={"NPI": "npi", "Facility Name": "org", "num_org_mem": "size"})
+    cms["z5"] = cms["ZIP Code"].str[:5]
+    cms["sys"] = cms.org.fillna("").str.upper().str.contains(SYSTEM_GROUP_RE, regex=True)
+    m = prov.drop_duplicates("npi").merge(cms, on="npi", how="inner")
+    m["same"] = m.z5 == m.zip
+    rows = []
+    for npi, x in m.groupby("npi"):
+        s = x[x.same]
+        pick = s if len(s) else x
+        sys = bool(s.sys.any()) if len(s) else bool(x.sys.all())
+        grp = pick[pick.org.notna()].sort_values("sys", ascending=not sys)
+        top = grp.iloc[0] if len(grp) else pick.iloc[0]
+        rows.append((npi, True, top.org if isinstance(top.org, str) else "", top["size"], sys, top.cms_as_of))
+    return pd.DataFrame(rows, columns=["npi", "cms_match", "cms_group", "cms_group_size", "sys_emp", "cms_as_of"])
+
+
 # ---------------- geocoding ----------------
 def census_batch(rows):
     """rows: list of (id, street, city, state, zip). Returns {id: (lat, lon)}."""
@@ -150,6 +223,7 @@ def main(refresh=False):
     if refresh:
         for f in NPI_DIR.glob("*.jsonl"):
             f.unlink()
+    cms_download(refresh)
     zips = ring_zips(parcels, hg, ai)
     log(f"NPI pull for {len(zips)} ZIPs (cached ZIPs are skipped)")
     with ThreadPoolExecutor(6) as ex:
@@ -224,6 +298,10 @@ def main(refresh=False):
     nn = nn[~nn.index.duplicated()]
     g.loc[miss, "par"] = nn.Acct.map(lambda a: {a} if isinstance(a, str) else None)
     g["hs_bldg"] = g.par.map(lambda s: bool(s) and len(s & hs_par) > 0)
+    g = g.merge(cms_affiliation(g[["npi", "zip"]]), on="npi", how="left")
+    g["sys_emp"] = g.sys_emp.fillna(False).astype(bool)
+    # hospital side = hospital-owned building OR billing through a health-system medical group (CMS)
+    g["indep"] = ~g.hs_bldg & ~g.sys_emp
     g["grp"] = g.tcode.map(provider_group)
     g["phys"] = g.grp.eq("ph")
     # practice location = building + suite; providers sharing one are one potential suite buyer
@@ -233,12 +311,16 @@ def main(refresh=False):
     per, A = {}, set()
     S = {k: set() for k in ("phOff", "phOn", "dnOff", "dnOn", "otOff", "otOn", "pxOff")}
 
+    S["phSys"] = set()
+
     def sets(x):
-        off, on = x[~x.hs_bldg], x[x.hs_bldg]
+        off, on = x[x.indep], x[~x.indep]
         return {"phOff": set(off[off.grp == "ph"].npi), "phOn": set(on[on.grp == "ph"].npi),
                 "dnOff": set(off[off.grp == "dn"].npi), "dnOn": set(on[on.grp == "dn"].npi),
                 "otOff": set(off[off.grp == "ot"].npi), "otOn": set(on[on.grp == "ot"].npi),
-                "pxOff": set(off[off.grp.isin(OWNER_USER_GROUPS)].ploc)}
+                "pxOff": set(off[off.grp.isin(OWNER_USER_GROUPS)].ploc),
+                # physicians in independent buildings who bill through a health-system group (moved to the hospital side)
+                "phSys": set(x[~x.hs_bldg & x.sys_emp & (x.grp == "ph")].npi)}
 
     for _, h in hg.iterrows():
         x = g[g.geometry.distance(h.geometry) <= radius]
@@ -247,7 +329,11 @@ def main(refresh=False):
         A |= set(x.npi)
         for k, v in s.items():
             S[k] |= v
-    out = {"per": per, "tot": {k: len(v) for k, v in S.items()} | {"cl": len(A)}, "as_of": date.today().isoformat()}
+    cms_as_of = g.cms_as_of.dropna().iloc[0] if g.cms_as_of.notna().any() else None
+    out = {"per": per, "tot": {k: len(v) for k, v in S.items()} | {"cl": len(A)}, "as_of": date.today().isoformat(),
+           "cms_as_of": cms_as_of}
+    ph = g[(g.grp == "ph") & (g.geometry.distance(hg.geometry.union_all()) <= radius)]
+    log(f"physicians within radius with a CMS record: {ph.cms_match.fillna(False).mean():.1%}")
     (PROC / "npi_counts.json").write_text(json.dumps(out, indent=1))
     g["par"] = g.par.map(lambda s: ";".join(sorted(s)) if s else "")
     g.drop(columns=["geometry"]).to_csv(PROC / "npi_providers_near.csv", index=False)

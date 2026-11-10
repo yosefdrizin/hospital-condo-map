@@ -62,10 +62,10 @@ def main():
     P = "'Hospital x Project'!"
     hs = sorted(d["hospitals"], key=lambda h: -h["b"])
     sh = ["Hospital", "System", "Licensed Beds", "Condo Buildings", "Condo Suites", "Medical Suites", "Hospital-owned Suites",
-          "Independent Medical Suites", "Indep. Medical Sold in Last 3 Yrs", "Physicians in Independent Buildings",
-          "Physicians in Hospital-owned Buildings", "Dentists in Independent Buildings", "Dentists in Hospital-owned Buildings",
-          "Other Outpatient in Independent Buildings", "Other Outpatient in Hospital-owned Buildings",
-          "Practice Locations in Independent Buildings", "All Clinicians", "Notes"]
+          "Independent Medical Suites", "Indep. Medical Sold in Last 3 Yrs", "Independent Physicians (building and group)",
+          "Physicians in Hospital-owned Buildings or Hospital-employed", "Independent Dentists", "Dentists in Hospital-owned Buildings or Hospital-employed",
+          "Independent Other Outpatient", "Other Outpatient in Hospital-owned Buildings or Hospital-employed",
+          "Independent Practice Locations", "All Clinicians", "Notes"]
     dk = ("phOff", "phOn", "dnOff", "dnOn", "otOff", "otOn", "pxOff", "cl")
     srows = []
     for i, h in enumerate(hs, start=2):
