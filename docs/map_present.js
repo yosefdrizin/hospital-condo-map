@@ -10,11 +10,21 @@ function boot(){H=window.HCM;map=H.map;
   const css=document.createElement('style');css.textContent=CSS;document.head.append(css);
   $('.mt-tools').insertAdjacentHTML('beforeend',`<button class="mt-btn" id="mp-dash" title="Charts that follow your filters">Dashboard</button><button class="mt-btn" id="mp-cmp" title="Swipe between two basemaps">Compare</button><button class="mt-btn" id="mp-pres" title="Full-screen presentation">Present</button><button class="mt-btn" id="mp-exp" title="Save the map as an image or PDF">Export</button>`);
   $('#mp-dash').addEventListener('click',toggleDash);$('#mp-cmp').addEventListener('click',toggleCompare);$('#mp-pres').addEventListener('click',()=>present(true));$('#mp-exp').addEventListener('click',exportPop);
+  toolsMenu();
   window.addEventListener('mt-change',()=>{if($('#mp-dashp'))renderDash()});
   map.on('moveend',()=>{if($('#mp-dashp')&&dash().onScreen)renderDash()});
 }
 function start(){if(window.HCM&&window.HCM.mt&&window.HCM.mt.list)boot();else window.addEventListener('mt-ready',boot,{once:true})}
 if(window.HCM)start();else window.addEventListener('hcm-ready',start,{once:true});
+// one "Tools" button keeps the map clear: search and basemap stay up front, everything else opens from here
+function toolsMenu(){const t=$('.mt-tools');if(!t||t.querySelector('#mp-tools'))return;
+  const menu=document.createElement('div');menu.className='mt-tmenu';[...t.children].forEach(c=>menu.append(c));
+  t.innerHTML='<button class="mt-btn" id="mp-tools" aria-haspopup="true" aria-expanded="false">Tools ▾</button>';t.append(menu);
+  const set=o=>{t.classList.toggle('open',o);$('#mp-tools').setAttribute('aria-expanded',String(o))};
+  $('#mp-tools').addEventListener('click',()=>set(!t.classList.contains('open')));
+  menu.addEventListener('click',e=>{if(e.target.closest('.mt-btn'))setTimeout(()=>set(false),0)});
+  document.addEventListener('pointerdown',e=>{if(!t.contains(e.target))set(false)});
+  new MutationObserver(()=>[...t.children].forEach(c=>{if(c!==menu&&c.id!=='mp-tools')menu.append(c)})).observe(t,{childList:true})}
 const panel=(id,cls)=>{let p=$('#'+id);if(!p){p=document.createElement('div');p.id=id;p.className=cls;map.getContainer().append(p);L.DomEvent.disableClickPropagation(p);L.DomEvent.disableScrollPropagation(p)}return p};
 
 // ---------- dashboard ----------
@@ -169,7 +179,10 @@ function svgImage(svg,r){return new Promise((res,rej)=>{const cl=svg.cloneNode(t
   const img=new Image();img.onload=()=>res(img);img.onerror=rej;img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(new XMLSerializer().serializeToString(cl))})}
 
 const CSS=`
-.mt-tools{flex-wrap:wrap;justify-content:flex-end;max-width:calc(100% - 440px)}
+.mt-tools{flex-direction:column;align-items:flex-end;gap:4px}
+.mt-tmenu{display:none;flex-direction:column;align-items:stretch;gap:4px;min-width:130px}.mt-tools.open .mt-tmenu{display:flex}
+.mt-tmenu .mt-btn{text-align:left}
+@media (max-width:760px){.mt-tools .mt-tmenu{position:absolute;bottom:100%;right:0;margin-bottom:4px}.mt-tools [data-m]{display:inline-block}}
 .mp-dash{position:absolute;left:12px;top:56px;z-index:572;width:330px;max-width:calc(100% - 24px);max-height:calc(100% - 120px);overflow:auto;background:var(--surface);border:1px solid var(--rule);border-radius:6px;box-shadow:0 6px 20px rgba(0,0,0,.25);font-size:12.5px;padding:10px}
 .mp-dh{display:flex;gap:8px;align-items:center}.mp-dh select{flex:1;font:inherit;font-weight:600;color:var(--ink);background:var(--surface);border:1px solid var(--rule);border-radius:3px;padding:4px 6px}
 .mp-sub{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:8px 0;color:var(--muted);font-size:12px}.mp-sub label{display:flex;gap:4px;align-items:center;cursor:pointer}

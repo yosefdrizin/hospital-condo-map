@@ -109,7 +109,7 @@ def pull_zip(z):
 
 
 def ring_zips(parcels, hg, ai):
-    buf = hg.geometry.buffer(1.05 * SETTINGS["radius_miles"] * MILE_FT).union_all()
+    buf = hg.geometry.buffer(1.05 * SETTINGS.get("max_radius_miles", SETTINGS["radius_miles"]) * MILE_FT).union_all()
     near = parcels[parcels.intersects(buf)]
     z = ai[ai.GIS_PARCEL_ID.isin(near.Acct)].PROPERTY_ZIPCODE.fillna("").str.strip().str[:5]
     zips = sorted(set(z[z.str.match(r"^7[5-9]\d{3}$")]) | set(SETTINGS.get("extra_npi_zips", [])))
@@ -274,10 +274,11 @@ def main(refresh=False):
 
     g = df[df.lat.notna()].copy()
     g = gpd.GeoDataFrame(g, geometry=gpd.points_from_xy(g.lon, g.lat), crs=4326).to_crs(CRS_FT)
-    g = g[g.geometry.distance(hg.geometry.union_all()) <= SETTINGS["radius_miles"] * MILE_FT + 120].copy()
+    # keep providers out to the widest radius the map's slider offers; the public counts below still use radius_miles
+    g = g[g.geometry.distance(hg.geometry.union_all()) <= SETTINGS.get("max_radius_miles", SETTINGS["radius_miles"]) * MILE_FT + 120].copy()
 
     # hospital / health-system parcels
-    p = parcels[parcels.intersects(hg.geometry.buffer(6000).union_all())]
+    p = parcels[parcels.intersects(hg.geometry.buffer(SETTINGS.get("max_radius_miles", 1) * MILE_FT + 1000).union_all())]
     a2 = ai[ai.GIS_PARCEL_ID.isin(p.Acct)]
     cd = pd.read_csv(find_one(roll, "COM_DETAIL.CSV"), dtype=str, usecols=["ACCOUNT_NUM", "BLDG_CLASS_DESC"])
     hs_acct = set(a2[a2.OWNER_NAME1.fillna("").str.upper().str.contains(HEALTH_SYSTEM_PARCEL_RE, regex=True)].ACCOUNT_NUM) | \

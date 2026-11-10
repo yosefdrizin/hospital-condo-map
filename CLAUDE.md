@@ -36,14 +36,32 @@ the key travels after the # (never sent to the server) and is then remembered in
 The key is `outputs/private/map-key.txt`. It must never go in git, docs/, chat or a commit. Keep the same key across rebuilds, since old blobs stay in git history.
 To add data: put files in the right `data/raw/` folder, run `python pipeline/run_all.py --only 7`, then commit and push `docs/deal-data.bin`. New layers go in `LAYERS` in deal_layer.js.
 Never put that data in `docs/` unencrypted, including data.json, index.html or deal_layer.js.
-The owner is a principal (buys and converts buildings himself): budget under $3M, value-add or leased, buyers not yet chosen.
-Ranking defaults live in `RANK` in 07_targets.py; `rank_parts` (Python) and `score()` in deal_layer.js must stay the same math.
-On the map the owner edits every weight and threshold under "Ranking settings"; his settings live in his browser (localStorage), the workbook shows defaults.
-After changing deal_layer.js, bump `?v=` on its script tag in index.html so browsers load the new version.
-Deal mode flow: ranked worklist first in the panel; a dot or row opens one card (score bars, reasons, status + notes, Street View / DCAD / CoStar
-links, building, price, owner, demand, nearby comps and SBA deals, then "All details"). Status and notes live in this browser (localStorage
-`hcm-notes`); "Export my marked buildings" downloads them as CSV. Keyboard: arrows or j/k step through the list, Esc goes back.
-Layers drawn above the parcels must use an SVG renderer: a canvas in a higher pane covers the whole map and swallows clicks. Phase 1 ranks ring buildings only; phase 2 (outside the rings) needs a countywide NPI pull and a wider CoStar export.
+The owner is a principal (buys and converts buildings himself), value-add or leased, buyers not yet chosen. Price and DCAD value do not matter
+to him (DCAD value is unreliable): deal size is screened by building SF instead.
+Deal mode follows his path in three steps (answers to 40 questions, 11/9/2026):
+1. **Areas** (where to hunt): hospitals whose campus points are within 1 mile merge into one area (Southwestern Medical District = Parkland +
+   UTSW + Children's; Presbyterian / Walnut Hill = Presbyterian + Advanced Dallas), 12 areas. Graded A/B/C on practice locations per independent
+   medical condo suite, DCAD suite deeds, CoStar condo sales and SBA suite purchases in the lookback (percentiles among areas, weights adjustable).
+   Radius slider 0.5 to 3 mi (`max_radius_miles` in settings.json; step 3 pulls NPI that far, the public counts stay at 1 mile); lookback slider;
+   buyer types (physicians, dentists, therapy and other; med-adjacent is not in NPI). Scoreboard table plus a card list.
+2. **Buildings** (what to buy there): hard screens (size range, 4+ stories out, retail out, condos and hospital owners already out), then a grade:
+   half owner likely to sell (listed, years held from the later of DCAD deed and CoStar sale, full at 10; out of state, outside DFW half;
+   individual or trust; owner's only parcel in the county; owner-occupied; not institutional, also judged from CoStar true owner), half building
+   fit (use, already holds practices, parking, low-rise). Demand moved to the area (weight 0 by default). Age, vacancy and DCAD value trend
+   (TOT_VAL vs PREV_MKT_VAL) are shown, never scored. Top 25 per area. Change flags (New, Sold, Owner changed, Newly listed) compare with the
+   previous build on different source data (`outputs/private/last_build.json`); the 11/9/2026 build is the first baseline.
+3. **Brief**: "One-page brief" on the card opens a Holiner-branded printable page (green #78A167, tan #AFA183, cream #EDECE2) with a USGS aerial and
+   the parcel outline; print or save as PDF.
+Defaults live in `RANK` in 07_targets.py; `rank_parts` (Python) and `score()` in deal_layer.js must stay the same math (both round half up;
+check that the workbook's score total equals the map's). His settings live in localStorage `hcm-rank2`; the workbook shows defaults.
+Layers: ranked buildings, medical condo projects (bulk buy = one independent owner holds 2+ suites), for sale (CoStar; a listings export in
+`data/raw/costar_listings/` replaces the property-export flag), condo sales, SBA suite purchases are on by default; the rest sit under "More data".
+Every point item carries `ad` = [[area, miles]] so the map recounts at any radius. Practice locations travel as `pl` = [[group bits, ad]].
+Notes sync: status and notes (`hcm-notes`, each with `u` timestamp and delete tombstones) can sync through a secret GitHub Gist the owner
+owns, encrypted with the map key; the token he pastes is `hcm-gh` (never in backups, git or chat).
+After changing deal_layer.js, bump `?v=` on its script tag in index.html so browsers load the new version. Keyboard on a card: arrows or j/k, Esc.
+Layers drawn above the parcels must use an SVG renderer: a canvas in a higher pane covers the whole map and swallows clicks.
+The map toolbar keeps search and basemap up front; everything else sits in one "Tools" menu (map_present.js `toolsMenu`).
 
 ## Pipeline (pipeline/)
 | Step | File | Does | Writes |
@@ -88,7 +106,8 @@ Hospitals are in `config/hospitals.csv` (name, system, address, beds, lat/lon, n
 300 condo suites within 1 mile of the 15 hospitals; 135 medical; 40 hospital-owned; 106 independent medical;
 9 independent medical suites sold in the last 3 years. Within 1 mile (NPI pulled 2026-11-02, CMS group file 10/2/2026), independent:
 1,582 physicians, 406 dentists, 1,950 other outpatient, 1,462 practice locations; hospital-owned building or hospital-employed: 6,335 physicians,
-335 dentists, 1,354 other outpatient; 23,553 individual clinicians. (Before the CMS group rule, 11/9/2026: 1,738 independent physicians.) Private workbook: 1,545 conversion candidates.
+335 dentists, 1,354 other outpatient; 23,553 individual clinicians. (Before the CMS group rule, 11/9/2026: 1,738 independent physicians.) Private workbook (11/9/2026): 6,680 candidate buildings within 3 miles; 442 pass the
+default screens within 1 mile (15 A, 192 B, 235 C); 27 medical condo projects within 3 miles, 20 with a bulk-buy owner.
 If a rebuild changes these, say so.
 
 ## The page (docs/index.html)

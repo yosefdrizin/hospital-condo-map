@@ -201,13 +201,13 @@ function viewsPop(p){const views=ls.get(VKEY,[]);
   p.querySelector('#md-exp').addEventListener('click',exportBackup);
   p.querySelector('#md-impf').addEventListener('change',e=>{const f=e.target.files[0];if(f)importBackup(f)})}
 async function exportBackup(){const out={app:'hospital-condo-map',version:1,saved:new Date().toISOString(),local:{},idb:{}};
-  for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k.startsWith('hcm-')&&k!=='hcm-key')out.local[k]=localStorage.getItem(k)}
+  for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k.startsWith('hcm-')&&k!=='hcm-key'&&k!=='hcm-gh')out.local[k]=localStorage.getItem(k)}
   for(const k of await idb.keys())if(String(k).startsWith('ds:'))out.idb[k]=await idb.get(k);
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(out)],{type:'application/json'}));a.download=`map-backup-${new Date().toISOString().slice(0,10)}.json`;a.click();
   toast('Backup downloaded. It holds your private notes and data: keep it somewhere safe.',7000)}
 async function importBackup(f){try{const j=JSON.parse(await f.text());if(j.app!=='hospital-condo-map')throw new Error('Not a backup from this map.');
     if(!confirm('Restore this backup? It replaces your current notes, settings, drawings, views and added data in this browser.'))return;
-    Object.entries(j.local||{}).forEach(([k,v])=>{if(k!=='hcm-key')localStorage.setItem(k,v)});
+    Object.entries(j.local||{}).forEach(([k,v])=>{if(k!=='hcm-key'&&k!=='hcm-gh')localStorage.setItem(k,v)});
     for(const k of await idb.keys())if(String(k).startsWith('ds:'))await idb.del(k);
     for(const [k,v] of Object.entries(j.idb||{}))await idb.set(k,v);location.reload()}
   catch(e){toast('Restore failed: '+esc(e.message),8000)}}

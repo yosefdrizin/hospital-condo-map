@@ -5,6 +5,7 @@
   "tiger_year": 2025,
   "county_fips": "48113",
   "radius_miles": 1.0,
+  "max_radius_miles": 3.0,
   "context_parcel_radius_miles": 1.12,
   "road_radius_miles": 1.3,
   "imagery_half_width_miles": 1.2,
