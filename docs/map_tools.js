@@ -46,7 +46,11 @@ function boot(){H=window.HCM;map=H.map;H.searchProviders=H.searchProviders||[];
   // shared with map_data.js (uploads, drawing, views)
   H.unregisterLayer=id=>{const d=BY[id];if(!d)return;if(d._ov)map.removeLayer(d._ov);if(d._lab)map.removeLayer(d._lab);REG.splice(REG.indexOf(d),1);delete BY[id];delete ST[id];saveST();renderLegend();
     const t=$('#mt-table');if(t&&t.dataset.id===id)t.remove();const e=$('#mt-edit');if(e&&e.dataset.id===id)e.remove()};
-  H.mt={openEditor,openTable,renderLegend,closeMenus,setBase,getBase:()=>base.k,refreshLayer:id=>BY[id]&&applyAll(BY[id],true)};
+  H.mt={openEditor,openTable,renderLegend,closeMenus,setBase,getBase:()=>base.k,refreshLayer:id=>BY[id]&&applyAll(BY[id],true),
+    // for map_present.js (dashboard, compare, export)
+    bases:BASES,list:()=>REG.slice(),fields:id=>BY[id]?fields(BY[id]):[],filtered:id=>BY[id]?BY[id].features.filter(f=>passF(BY[id],f)):[],
+    filters:id=>stOf(id).filters,
+    setFilter:(id,rule)=>{const d=BY[id];if(!d)return;const s=stOf(id);s.filters=s.filters.filter(r=>r.field!==rule.field);if(rule.type)s.filters.push(rule);applyAll(d);const ed=$('#mt-edit');if(ed&&ed.dataset.id===id)renderEditor()}};
   window.dispatchEvent(new Event('mt-ready'));
   map.on('moveend',()=>REG.forEach(drawLabels));
   $('#mt-table-btn').addEventListener('click',()=>{if($('#mt-table')){$('#mt-table').remove();return}openTable((BY.cand||BY.condos).id)});
@@ -206,7 +210,8 @@ function register(def){if(BY[def.id]){const i=REG.indexOf(BY[def.id]);REG.splice
   setTimeout(()=>applyAll(def,true),0)}
 function applyAll(def,quiet){if(!quiet)saveST();buildScale(def);def.apply();def.restyle();drawOverlay(def);drawLabels(def);renderLegend();
   const ed=$('#mt-edit');if(ed&&ed.dataset.id===def.id){const c=$('#mt-count');if(c)c.textContent=countText(def)}
-  if($('#mt-table')&&$('#mt-table').dataset.id===def.id)renderTable()}
+  if($('#mt-table')&&$('#mt-table').dataset.id===def.id)renderTable();
+  window.dispatchEvent(new CustomEvent('mt-change',{detail:{id:def.id}}))}
 function countText(def){const n=def.features.filter(f=>passF(def,f)).length;return `Showing ${n.toLocaleString('en-US')} of ${def.features.length.toLocaleString('en-US')}`}
 
 // heatmap and hex bins

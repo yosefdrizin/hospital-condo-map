@@ -95,7 +95,7 @@ Data field names in data.json are short on purpose (see 05_build_site.py for the
 OpenStreetMap streets, USGS topo, plan), search (hospitals, condos, parcels, deal data via `HCM.searchProviders`, addresses via Nominatim),
 measure distance / area / radius, and a Layers panel that mirrors the page's own checkboxes. Live NAIP tiles are too slow (over 60 s a tile), so
 close-ups near hospitals still use the stitched NAIP snapshots. Roadmap the owner chose: (1) look and navigation [done], (2) styling and filters
-[done], (3) own data and drawing [done], then dashboards and presenting. Bump `?v=` on map_tools.js after changes.
+[done], (3) own data and drawing [done], (4) dashboards and presenting [done]. Bump `?v=` on map_tools.js after changes.
 Phase 2: layers register with `HCM.registerLayer({id,label,color,features:[{raw,props,lat,lon}],isOn,apply,restyle,open})` (deal_layer.js registers its
 six; map_tools registers the public condo projects). Per layer: style (points colored by category or number, size by number on the 5th to 95th
 percentile, opacity; heatmap via leaflet.heat 0.2.0 from cdnjs; hex bins), filters (number range, category checkboxes, text), labels, auto legend,
@@ -106,6 +106,13 @@ via Census JSONP then Nominatim, 1,000-row cap, cached), stored in IndexedDB `hc
 2.17.0 from jsdelivr (attached by hand with `new L.PM.Map(map)` since the map exists first), drawings in localStorage `hcm-draw`; Views
 (`hcm-views`) and a backup file of every `hcm-*` setting plus IndexedDB data, never `hcm-key`. Its popovers use `.md-pop`, not `.mt-pop`
 (map_tools closes `.mt-pop` on outside clicks). autoFocus in index.html leaves an open deal card alone.
+Phase 4 is `docs/map_present.js` (public, no data): Dashboard (number boxes, bar charts, histograms per layer; clicking a bar or bin sets a
+filter through `HCM.mt.setFilter`; listens for the `mt-change` event; charts saved in `hcm-dash`), Compare (second tile basemap in pane `cmp`,
+clipped with CSS `clip` to a draggable divider), Present (full screen, editable title in `hcm-present-title`, saved views as slides, arrows / Esc),
+and Export (composes tiles, canvases, SVG panes and labels onto a canvas, adds title, legend, scale bar and credit; PNG, or PDF via jsPDF 2.5.1
+from cdnjs). Tile layers need `crossOrigin:true` or export skips them.
+Never edit docs files with PowerShell Get-Content / Set-Content: Windows PowerShell reads UTF-8 without a BOM as ANSI and mangles ·, ¼, – and ←.
+Use the Edit tool.
 Some source labels in the page footer are hard-coded (DCAD roll date, TIGER year); update them after a data refresh.
 
 ## Gotchas
