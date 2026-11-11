@@ -47,7 +47,9 @@ Deal mode follows his path in three steps (answers to 40 questions, 11/9/2026):
 2. **Buildings** (what to buy there): hard screens (size range, 4+ stories out, retail out, condos and hospital owners already out), then a grade:
    half owner likely to sell (listed, years held from the later of DCAD deed and CoStar sale, full at 10; out of state, outside DFW half;
    individual or trust; owner's only parcel in the county; owner-occupied; not institutional, also judged from CoStar true owner), half building
-   fit (use, already holds practices, parking, low-rise). Demand moved to the area (weight 0 by default). Age, vacancy and DCAD value trend
+   fit (use, already holds practices, parking, low-rise). Parking in the score is CoStar's count where it exists, else the DCAD land
+   estimate: (land SF minus building footprint) / `PARK_SF_PER_SPACE` (575, calibrated against CoStar 11/11/2026, rough) per 1,000 SF; the
+   card shows both, plus DCAD's zoning label (LAND.CSV, the city's description, PD districts need the PD number). Demand moved to the area (weight 0 by default). Age, vacancy and DCAD value trend
    (TOT_VAL vs PREV_MKT_VAL) are shown, never scored. Top 25 per area. Change flags (New, Sold, Owner changed, Newly listed) compare with the
    previous build on different source data (`outputs/private/last_build.json`); the 11/9/2026 build is the first baseline.
 3. **Brief**: "One-page brief" on the card opens a Holiner-branded printable page (green #78A167, tan #AFA183, cream #EDECE2) with a USGS aerial and
@@ -107,7 +109,7 @@ Hospitals are in `config/hospitals.csv` (name, system, address, beds, lat/lon, n
 9 independent medical suites sold in the last 3 years. Within 1 mile (NPI pulled 2026-11-02, CMS group file 10/2/2026), independent:
 1,582 physicians, 406 dentists, 1,950 other outpatient, 1,462 practice locations; hospital-owned building or hospital-employed: 6,335 physicians,
 335 dentists, 1,354 other outpatient; 23,553 individual clinicians. (Before the CMS group rule, 11/9/2026: 1,738 independent physicians.) Private workbook (11/9/2026): 6,680 candidate buildings within 3 miles; 442 pass the
-default screens within 1 mile (15 A, 192 B, 235 C); 27 medical condo projects within 3 miles, 20 with a bulk-buy owner.
+default screens within 1 mile (26 A, 179 B, 237 C after the CMS group rule and the parking estimate, 11/11/2026); 27 medical condo projects within 3 miles, 20 with a bulk-buy owner.
 If a rebuild changes these, say so.
 
 ## The page (docs/index.html)

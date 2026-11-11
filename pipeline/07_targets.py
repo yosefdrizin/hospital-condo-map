@@ -60,6 +60,10 @@ RANK = {
     "area": {"ratio": 50, "deeds": 25, "comps": 15, "sba": 10},
     "buyers": {"ph": 1, "dn": 1, "ot": 1},
 }
+# Parking estimate from DCAD land: open land (parcel area minus building footprint) per space. Calibrated 11/11/2026 against
+# 658 ring buildings with a CoStar space count and agreeing sizes: median 573 SF of open land per space, quartiles 414 to 856
+# (drives, landscaping and setbacks included). A rough estimate, not a count; CoStar's count is used for the score where it exists.
+PARK_SF_PER_SPACE = 575
 # hospitals whose campus points are this close become one area (Medical District, Presbyterian / Walnut Hill)
 AREA_JOIN_MI = 1.0
 AREA_NAMES = {"Parkland Memorial Hospital": "Southwestern Medical District", "Texas Health Presbyterian Hospital Dallas": "Presbyterian / Walnut Hill"}
@@ -405,7 +409,13 @@ def score_candidates(b, costar_row, geo, sba_pts):
     for_sale = pd.Series([t is not None and t["For Sale Status"] == "Y" for t in rows])
     leased = pd.Series([t["Percent Leased"] if t is not None else float("nan") for t in rows])
     park = pd.Series([t["Parking Ratio"] if t is not None else float("nan") for t in rows])
-    st, mz = b.mst.fillna("").str.strip().str.upper(), b.mzip.fillna("").str[:3]
+    # DCAD land estimate: open land (parcel minus footprint) per 1,000 SF of building, and the spaces it would hold at PARK_SF_PER_SPACE
+    open_sf = (b.land - b.foot).where((b.land > b.foot) & (b.SF > 0))
+    b["open_k"] = (open_sf / (b.SF / 1000)).round()
+    b["pkx"] = (open_sf / PARK_SF_PER_SPACE / (b.SF / 1000)).round(1)
+    b["pkc"] = park
+    park = park.where(park.notna(), b.pkx)                       # CoStar's count where it exists, else the land estimate
+    st, mz =b.mst.fillna("").str.strip().str.upper(), b.mzip.fillna("").str[:3]
     out_state = ~st.isin(["TX", "TEXAS", ""])                      # DCAD spells the state out
     own = b.owner.fillna("").str.upper()
     uses = pd.Series([use_category(c, s) for c, s in zip(b.cls, b.sptd)])          # the main building's use, not any account on the parcel
@@ -453,8 +463,10 @@ def score_candidates(b, costar_row, geo, sba_pts):
             bits.append(f"{int(r.ST)} stor{'y' if r.ST == 1 else 'ies'}")
         if r.px:
             bits.append(f"{r.px} practice{'s' if r.px > 1 else ''} inside")
-        if park[i] == park[i]:
-            bits.append(f"parking {park[i]:.1f}/1,000")
+        if b.pkc[i] == b.pkc[i]:
+            bits.append(f"parking {b.pkc[i]:.1f}/1,000")
+        elif park[i] == park[i]:
+            bits.append(f"parking about {park[i]:.1f}/1,000 (land est.)")
         return " · ".join(bits)
 
     b["why"] = [why(i) for i in b.index]
@@ -483,10 +495,15 @@ def main():
     ai["TOT_VAL"] = pd.to_numeric(ai.TOT_VAL, errors="coerce")
     ai["PREV_MKT_VAL"] = pd.to_numeric(ai.PREV_MKT_VAL, errors="coerce")
     cd = pd.read_csv(find_one(roll, "COM_DETAIL.CSV"), dtype=str)
-    for c in ["GROSS_BLDG_AREA", "NET_LEASE_AREA", "YEAR_BUILT", "REMODEL_YR", "NUM_STORIES"]:
+    for c in ["GROSS_BLDG_AREA", "NET_LEASE_AREA", "YEAR_BUILT", "REMODEL_YR", "NUM_STORIES", "FOUNDATION_AREA"]:
         cd[c] = pd.to_numeric(cd[c], errors="coerce")
     cda = cd.groupby("ACCOUNT_NUM").agg(SF=("GROSS_BLDG_AREA", "sum"), NRA=("NET_LEASE_AREA", "sum"), YR=("YEAR_BUILT", "min"),
-                                        REM=("REMODEL_YR", "max"), ST=("NUM_STORIES", "max")).reset_index()
+                                        REM=("REMODEL_YR", "max"), ST=("NUM_STORIES", "max"), FOOT=("FOUNDATION_AREA", "sum")).reset_index()
+    # land area (acres converted) and the city's zoning label, both from DCAD's land table
+    ld = pd.read_csv(find_one(roll, "LAND.CSV"), dtype=str, usecols=["ACCOUNT_NUM", "AREA_SIZE", "AREA_UOM_DESC", "ZONING"])
+    ld["land"] = pd.to_numeric(ld.AREA_SIZE, errors="coerce") * ld.AREA_UOM_DESC.map({"ACRE": 43560.0, "SQUARE FEET": 1.0})
+    lda = ld.groupby("ACCOUNT_NUM").agg(land=("land", "sum"), zoning=("ZONING", "first")).reset_index()
+    cda = cda.merge(lda, on="ACCOUNT_NUM", how="left")
     big = cd.sort_values("GROSS_BLDG_AREA", ascending=False).drop_duplicates("ACCOUNT_NUM")
     ai = ai.merge(cda, on="ACCOUNT_NUM", how="left").merge(
         big[["ACCOUNT_NUM", "BLDG_CLASS_DESC", "PROPERTY_NAME", "PROPERTY_QUAL_DESC", "PROPERTY_COND_DESC"]], on="ACCOUNT_NUM", how="left")
@@ -512,7 +529,7 @@ def main():
         qual=("PROPERTY_QUAL_DESC", "first"), cond=("PROPERTY_COND_DESC", "first"),
         codes=("code", lambda s: set(s)), SF=("SF", "sum"), NRA=("NRA", "sum"), YR=("YR", "min"), REM=("REM", "max"),
         ST=("ST", "max"), val=("TOT_VAL", "sum"), prev=("PREV_MKT_VAL", "sum"), deed=("deed", "max"), acct=("ACCOUNT_NUM", "first"),
-        accts=("ACCOUNT_NUM", "count")).reset_index()
+        accts=("ACCOUNT_NUM", "count"), land=("land", "sum"), foot=("FOOT", "sum"), zoning=("zoning", "first")).reset_index()
     b["tax"] = ((b.val / b.prev.where(b.prev > 0)) - 1) * 100      # DCAD value vs prior year market value, %
     b["own_n"] = b.owner.fillna("").str.strip().str.upper().map(own_n).fillna(1).astype(int)
     prop = (b.num.fillna("").str.strip() + " " + b.street.fillna("")).map(norm_street)
@@ -615,7 +632,11 @@ def main():
         rows.append([None if r.rank != r.rank else int(r.rank), r.grade, r.score, r.why, nh, nd, len(r.near), f"{s(r.num)} {s(r.street)}".strip(), s(r.city),
                      r.name if isinstance(r.name, str) and r.name != "UNASSIGNED" else "", s(r.cls), use_category(r.cls, r.sptd),
                      int(r.SF), int(r.NRA) if r.NRA > 0 else None, int(r.YR) if r.YR > 0 else None,
-                     int(r.REM) if r.REM > 0 else None, int(r.ST) if r.ST > 0 else None, s(r.qual), s(r.cond),
+                     int(r.REM) if r.REM > 0 else None, int(r.ST) if r.ST > 0 else None,
+                     s(r.zoning), int(r.land) if r.land > 0 else None, int(r.foot) if r.foot > 0 else None,
+                     int(r.open_k) if r.open_k == r.open_k else None, r.pkx if r.pkx == r.pkx else None,
+                     "CoStar" if r.pkc == r.pkc else "Land estimate" if r.pkx == r.pkx else "None",
+                     s(r.qual), s(r.cond),
                      int(r.val) if pd.notna(r.val) else None, round(r.val / r.SF) if pd.notna(r.val) and r.SF else None,
                      r.deed.strftime("%Y-%m-%d") if pd.notna(r.deed) else "", s(r.owner), s(r.owner2),
                      OWNER_TYPE.get(owner_class(s(r.owner)), "Investor / other"), mail(r), s(r.mst),
@@ -645,7 +666,9 @@ def main():
     xl.sheet(ws, ring_head,
              srows, [44, 9, 9, 11, 11, 11, 11, 11, 12, 12, 10, 12, 10, 10, 10], {"L": "#,##0"})
     cand_head = ["Rank", "Grade", "Score", "Why", "Nearest Hospital", "Distance (mi)", "Hospital Rings Containing", "Address", "City", "Property Name", "DCAD Bldg Class",
-              "Use", "Bldg SF", "Net Leasable SF", "Yr Built", "Remodel Yr", "Stories", "DCAD Quality", "DCAD Condition",
+              "Use", "Bldg SF", "Net Leasable SF", "Yr Built", "Remodel Yr", "Stories",
+              "Zoning (DCAD)", "Land SF (DCAD)", "Footprint SF (DCAD)", "Open Land per 1,000 SF Bldg", "Est. Parking/1,000 (land)", "Parking Used in Score",
+              "DCAD Quality", "DCAD Condition",
               "DCAD Value", "Value / SF", "Latest Deed", "Owner", "Owner 2", "Owner Type", "Owner Mailing Address", "Owner State",
               "Physicians in Bldg", "Dentists in Bldg", "Other Outpatient in Bldg", "All Clinicians in Bldg",
               "Practice Locations in Bldg", "DCAD Accounts", "DCAD Account", "GIS Parcel ID",
@@ -658,9 +681,10 @@ def main():
               "DCAD Value Change vs Prior Yr (%)", "DCAD Prior Yr Market Value", "Owner's Parcels in County", "Owner-occupied",
               "Listed (CoStar listings)", "Default Screens", "Changes Since Last Build"]
     fmt_by = {"Distance (mi)": "0.00", "Bldg SF": "#,##0", "Net Leasable SF": "#,##0", "DCAD Value": "$#,##0", "Value / SF": "$#,##0",
+              "Land SF (DCAD)": "#,##0", "Footprint SF (DCAD)": "#,##0", "Open Land per 1,000 SF Bldg": "#,##0", "Est. Parking/1,000 (land)": "0.0",
               "CoStar RBA": "#,##0", "CoStar Available SF": "#,##0", "CoStar Last Sale Price": "$#,##0", "DCAD Prior Yr Market Value": "$#,##0"}
     xl.sheet(wb.create_sheet("Candidate Buildings"), cand_head,
-             rows, [6, 6, 6, 60, 38, 9, 9, 28, 12, 26, 24, 16, 10, 10, 8, 8, 7, 10, 10, 13, 9, 11, 34, 20, 18, 44, 7, 9, 9, 9, 9, 9, 8, 20, 20,
+             rows, [6, 6, 6, 60, 38, 9, 9, 28, 12, 26, 24, 16, 10, 10, 8, 8, 7, 24, 10, 10, 10, 9, 12, 10, 10, 13, 9, 11, 34, 20, 18, 44, 7, 9, 9, 9, 9, 9, 8, 20, 20,
                     11, 26, 20, 16, 7, 10, 9, 8, 7, 8, 10, 14, 7, 9, 11, 13, 30, 9, 14, 11, 9, 9, 9, 9, 9, 9, 7, 9, 13, 9, 9, 9, 18, 24],
              {xl.L(cand_head.index(k) + 1): v for k, v in fmt_by.items()})
     if cs is not None:
@@ -709,7 +733,8 @@ def main():
                     "Owner likely to sell: listed for sale 15%, years since the later of the last DCAD deed and CoStar's last sale (full at 10) 30%, owner mails from out of state 20% "
                     "(outside DFW 750-753 ZIPs counts half), owner is a person, trust or estate 10%, this is the owner's only parcel in Dallas County 10%, "
                     "owner-occupied (mailing address is the building) 10%, not institutional 5%. Building fit: use (medical office 100, office 70, "
-                    "flex 50, retail 20) 40%, already holds 2+ practice locations (NPI) 25%, CoStar parking 20%, low-rise (1 story best) 15%. "
+                    "flex 50, retail 20) 40%, already holds 2+ practice locations (NPI) 25%, parking (CoStar count, else the DCAD land estimate) 20%, "
+                    "low-rise (1 story best) 15%. "
                     f"Default screens: {RANK['opts']['sizeMin']:,} to {RANK['opts']['sizeMax']:,} SF, {RANK['opts']['maxStories']} stories or fewer, no retail, "
                     f"within {SETTINGS['radius_miles']:g} mile. Rank counts only buildings that pass them. Price and DCAD value are not used. "
                     "Age, vacancy and the DCAD value trend are shown but not scored. CoStar facts count only where CoStar and DCAD sizes agree within 25%. "
@@ -718,6 +743,10 @@ def main():
                            "stories, DCAD quality and condition grades, total appraised value and latest deed transfer date. "
                            "Value / SF is DCAD value over gross SF, not a market price. Value change vs prior year compares the 2026 total value "
                            "with DCAD's prior-year market value (PREV_MKT_VAL) on the same accounts; it tracks the tax bill's direction, not a sale price."),
+        ("Parking estimate", f"Est. Parking/1,000 (land) = (DCAD land SF minus building footprint) / {PARK_SF_PER_SPACE} SF per space, per 1,000 SF of building. "
+                             "The 575 SF per space came from 658 ring buildings with a CoStar space count on 11/11/2026 (median; quartiles 414 to 856), so it is "
+                             "a rough estimate of what the site can hold, not a count. CoStar's own parking fields can be wrong (RB Medical Plaza in San Diego shows "
+                             "0.53/1,000 in CoStar against 5.8 in its OM); where the two disagree, count rows on the aerial. Zoning is DCAD's copy of the city's label."),
         ("Owner type", "Owner-name screen: a name that reads like a medical practice, else investor / other. LLCs hide many owner-users."),
         ("Providers in building", "Individual NPI records whose practice address matches the parcel. Physicians = MD/DO; dentists; other outpatient = "
                                   "chiropractic, PT, OT, optometry, podiatry, psychology, counseling, clinical social work, MFT, audiology, speech. "
